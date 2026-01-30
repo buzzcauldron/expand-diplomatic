@@ -306,9 +306,9 @@ def main() -> None:
     ap.add_argument(
         "--modality",
         type=str,
-        choices=("full", "conservative", "normalize", "aggressive"),
+        choices=("full", "conservative", "normalize", "aggressive", "local"),
         default="full",
-        help="Expansion style: full (default), conservative, normalize, aggressive",
+        help="Expansion style: full (default), conservative, normalize, aggressive, local (for non-Gemini models)",
     )
     ap.add_argument(
         "--api-key",

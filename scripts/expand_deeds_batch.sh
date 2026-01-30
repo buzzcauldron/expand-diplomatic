@@ -5,7 +5,7 @@
 # Usage: ./scripts/expand_deeds_batch.sh [BASE_DIR]
 #   BASE_DIR default: "$HOME/Downloads/Deeds test material"
 #
-# Env: BACKEND (gemini|local), MODALITY (full|conservative|normalize|aggressive),
+# Env: BACKEND (gemini|local), MODALITY (full|conservative|normalize|aggressive|local),
 #      EXAMPLES (path to examples.json). For gemini, set GEMINI_API_KEY or GOOGLE_API_KEY.
 
 set -euo pipefail

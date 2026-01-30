@@ -14,7 +14,6 @@ class ExpandCancelled(Exception):
     """Raised when expansion is cancelled by the user."""
 
 
-
 def _get_max_concurrent(backend: str) -> int:
     """Max parallel block expansions. Env EXPANDER_MAX_CONCURRENT overrides."""
     v = os.environ.get("EXPANDER_MAX_CONCURRENT", "").strip()
@@ -40,9 +39,8 @@ def get_block_ranges(xml_source: str, block_tags: set[str] | None = None) -> lis
     Used to map click position to block index for input/output sync.
     """
     tags = block_tags or TEXT_BLOCK_TAGS
-    parser = etree.XMLParser(recover=True, remove_blank_text=False)
     try:
-        root = etree.fromstring(xml_source.encode("utf-8"), parser=parser)
+        root = etree.fromstring(xml_source.encode("utf-8"), etree.XMLParser(recover=True, remove_blank_text=False))
     except etree.XMLSyntaxError:
         return []
     ranges: list[tuple[int, int]] = []
@@ -90,11 +88,12 @@ def extract_expansion_pairs(
     Used for auto-learning from Gemini expansion results.
     """
     tags = block_tags or TEXT_BLOCK_TAGS
+
     parser = etree.XMLParser(recover=True, remove_blank_text=False)
 
     def get_blocks(xml_str: str) -> list[str]:
         try:
-            root = etree.fromstring(xml_str.encode("utf-8"), parser=parser)
+            root = etree.fromstring(xml_str.encode("utf-8"), parser)
         except etree.XMLSyntaxError:
             return []
 
@@ -127,9 +126,8 @@ def extract_text_lines(xml_source: str, block_tags: set[str] | None = None) -> s
     Returns plain text suitable for saving as .txt.
     """
     tags = block_tags or TEXT_BLOCK_TAGS
-    parser = etree.XMLParser(recover=True, remove_blank_text=False)
     try:
-        root = etree.fromstring(xml_source.encode("utf-8"), parser=parser)
+        root = etree.fromstring(xml_source.encode("utf-8"), etree.XMLParser(recover=True, remove_blank_text=False))
     except etree.XMLSyntaxError:
         return ""
     lines: list[str] = []
@@ -147,7 +145,7 @@ def extract_text_lines(xml_source: str, block_tags: set[str] | None = None) -> s
             lines.append(raw.strip())
     return "\n".join(lines)
 
-MODALITIES = ("full", "conservative", "normalize", "aggressive")
+MODALITIES = ("full", "conservative", "normalize", "aggressive", "local")
 _LATIN = " Keep the full (expanded) form in Latin. Do not translate to English or any other language."
 MODALITY_SYSTEM: dict[str, str] = {
     "full": (
@@ -170,13 +168,31 @@ MODALITY_SYSTEM: dict[str, str] = {
         "normalize punctuation and spacing, and lightly modernize wording where it aids clarity."
         + _LATIN + " Output only the expanded text, no XML, no commentary."
     ),
+    "local": (
+        "Expand diplomatic transcriptions: resolve abbreviations and superscripts."
+        + _LATIN
+        + " Output only the expanded text, no XML, no commentary. Use the examples as your guide."
+    ),
 }
 
 
 def _build_prompt_prefix(examples: list[dict[str, str]], modality: str = "full") -> str:
-    """Build system + examples once; append block text per call."""
+    """Build system + examples once; append block text per call. For local backend."""
     system = MODALITY_SYSTEM.get(modality) or MODALITY_SYSTEM["full"]
     parts = [system, ""]
+    for ex in examples:
+        parts.append("Diplomatic:")
+        parts.append(ex["diplomatic"])
+        parts.append("Full:")
+        parts.append(ex["full"])
+        parts.append("")
+    parts.append("Diplomatic:")
+    return "\n".join(parts)
+
+
+def _build_prompt_prefix_examples_only(examples: list[dict[str, str]]) -> str:
+    """Build examples section only (no modality). For Gemini with system_instruction."""
+    parts = []
     for ex in examples:
         parts.append("Diplomatic:")
         parts.append(ex["diplomatic"])
@@ -235,11 +251,13 @@ def _expand_text_block(
         return run_local(text, examples, prompt, model=model)
     from run_gemini import run_gemini
 
+    system = MODALITY_SYSTEM.get(modality) or MODALITY_SYSTEM["full"]
     return run_gemini(
         prompt,
         model=model,
         api_key=api_key,
         temperature=0.2,
+        system_instruction=system,
         client=client,
         uploaded_file=uploaded_file,
     )
@@ -339,8 +357,7 @@ def _expand_once(
 ) -> str:
     """Single expansion pass. Used internally by expand_xml for recursive correction."""
     tags = block_tags or TEXT_BLOCK_TAGS
-    parser = etree.XMLParser(recover=True, remove_blank_text=False)
-    root = etree.fromstring(xml_source.encode("utf-8"), parser=parser)
+    root = etree.fromstring(xml_source.encode("utf-8"), etree.XMLParser(recover=True, remove_blank_text=False))
 
     def local_name(el: etree._Element) -> str:
         return etree.QName(el).localname if el.tag is not None else ""
@@ -373,8 +390,14 @@ def _expand_once(
     # When using Files API, use sequential to avoid shared client issues
     if client is not None and uploaded_file is not None:
         max_concurrent = 1
-    # Prebuild prompt prefix once (system + examples) to avoid per-block string rebuild
-    prompt_prefix = _build_prompt_prefix(examples, modality) if not dry_run and total > 0 else None
+    # Prebuild prompt prefix: Gemini uses examples-only + system_instruction; local uses combined.
+    prompt_prefix: str | None = None
+    if not dry_run and total > 0:
+        prompt_prefix = (
+            _build_prompt_prefix_examples_only(examples)
+            if backend == "gemini"
+            else _build_prompt_prefix(examples, modality)
+        )
 
     def expand_one(args: tuple[int, Any, str]) -> tuple[int, Any, str]:
         i, el, raw = args
@@ -429,7 +452,10 @@ def _expand_once(
                         _set_inner_text(el_a, expanded_a)
                         if progress_callback is not None:
                             progress_callback(next_to_apply + 1, total, "Expanding…")
-                        if partial_result_callback is not None:
+                        # Stream updates; throttle when many blocks to reduce serialization cost
+                        if partial_result_callback is not None and (
+                            next_to_apply == total - 1 or total <= 8 or next_to_apply % 2 == 1
+                        ):
                             partial_result_callback(_serialize_root(root))
                         next_to_apply += 1
     finally:
