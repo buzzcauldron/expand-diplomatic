@@ -50,6 +50,7 @@ def _run_one(
     backend: str = "gemini",
     modality: str = "full",
     input_file_path: Path | None = None,
+    examples_path: Path | None = None,
     use_files_api: bool = False,
     dry_run: bool = False,
     max_concurrent: int | None = None,
@@ -65,6 +66,7 @@ def _run_one(
         model=model,
         api_key=api_key,
         input_file_path=input_path,
+        examples_path=examples_path,
         dry_run=dry_run,
         backend=backend,
         modality=modality,
@@ -182,6 +184,8 @@ def _run_expand(args: argparse.Namespace) -> None:
     passes = max(1, min(5, passes))
     whole_document = not getattr(args, "block_by_block", False)
 
+    ex_path = Path(args.examples) if whole_document and backend == "gemini" else None
+
     def run(text: str, out: Path | None, *, fpath: Path | None = None, files_api: bool = False) -> None:
         _run_one(
             text,
@@ -192,6 +196,7 @@ def _run_expand(args: argparse.Namespace) -> None:
             backend=backend,
             modality=modality,
             input_file_path=fpath,
+            examples_path=ex_path,
             use_files_api=files_api,
             dry_run=dry_run,
             max_concurrent=mc,

@@ -114,6 +114,7 @@ python gui.py
 
 ### Extra features
 
+- **Diff** – Show a unified diff between input and output (like `diff input.xml output.xml`), so you can see exactly what the expansion changed.
 - **Input→TXT** / **Output→TXT** – Export text blocks to plain `.txt` files.
 - **Click to sync** – Click a block in input or output to jump to the matching block in the other panel.
 - **Double-click companion line** – Double-click a block to select it in both panels and show the matching line in the companion XML. The program opens the companion file in the other panel if needed (e.g. `filename_expanded.xml` when you double-click in input, or `filename.xml` when you double-click in output), then scrolls to the same block index so you always see input and output from the same pair of files.

@@ -238,6 +238,17 @@ def _whole_doc_system(modality: str) -> str:
     return base + _WHOLE_DOC_OUTPUT
 
 
+_WHOLE_DOC_FILE_UPLOAD_INSTRUCTION = (
+    "Here is an XML file containing diplomatic medieval Latin transcriptions "
+    "(i.e. with special characters to indicate abbreviations). "
+    "Please expand all abbreviations and output a valid XML file containing the full transcription. "
+    "To help you, I attached a JSON file of example expansions. "
+    "Do not output anything other than the contents of the XML file with the expanded abbreviations. "
+    "Do not modify any part of the input XML file other than the transcriptions. "
+    "Keep the expanded form in Latin. Do not translate to English."
+)
+
+
 def _expand_whole_document(
     xml_source: str,
     examples: list[dict[str, str]],
@@ -245,28 +256,46 @@ def _expand_whole_document(
     api_key: str | None,
     modality: str = "full",
     *,
+    examples_path: Path | str | None = None,
     client: Any = None,
     uploaded_file: Any = None,
 ) -> str:
-    """Expand entire XML document in one Gemini call."""
+    """Expand entire XML document in one Gemini call.
+    When examples_path is provided, upload it via Files API and pass [ex_file, xml]; else embed examples in prompt.
+    """
     from run_gemini import run_gemini
 
-    examples_part = _format_examples_for_prompt(examples)
-    user_msg = (
-        f"{examples_part}\n"
-        "Expand all diplomatic transcriptions in the following XML document.\n"
-        "Return the complete XML with only the text content inside elements changed.\n\n"
-        f"{xml_source}"
-    )
-    system = _whole_doc_system(modality)
+    examples_path = Path(examples_path) if examples_path else None
+    use_file_upload = examples_path is not None and examples_path.exists()
+
+    if use_file_upload:
+        # User's pattern: upload examples file, pass [ex_file, "\n\n", input_xml]
+        system = _WHOLE_DOC_FILE_UPLOAD_INSTRUCTION
+        contents = xml_source
+        file_path = examples_path
+        temperature = 1.0
+    else:
+        # Fallback: embed examples in prompt
+        examples_part = _format_examples_for_prompt(examples)
+        contents = (
+            f"{examples_part}\n"
+            "Expand all diplomatic transcriptions in the following XML document.\n"
+            "Return the complete XML with only the text content inside elements changed.\n\n"
+            f"{xml_source}"
+        )
+        system = _whole_doc_system(modality)
+        file_path = None
+        temperature = 0.2
+
     result = run_gemini(
-        user_msg,
+        contents,
         model=model,
         api_key=api_key,
         system_instruction=system,
-        temperature=0.2,
+        temperature=temperature,
         client=client,
         uploaded_file=uploaded_file,
+        file_path=file_path,
     )
     # Strip markdown code blocks if present
     s = result.strip()
@@ -366,6 +395,7 @@ def expand_xml(
     api_key: str | None = None,
     block_tags: set[str] | None = None,
     input_file_path: Path | None = None,
+    examples_path: Path | str | None = None,
     dry_run: bool = False,
     *,
     backend: str = "gemini",
@@ -385,7 +415,8 @@ def expand_xml(
     - model: model id (Gemini or Ollama, depending on backend).
     - api_key: override for Gemini (else uses GEMINI_API_KEY / GOOGLE_API_KEY).
     - block_tags: set of local tag names to process (default: TEI-style blocks).
-    - input_file_path: when set and backend=gemini, upload via Files API and pass as context.
+    - input_file_path: when set and backend=gemini (whole-doc), upload via Files API and pass as context.
+    - examples_path: when set and whole-doc, upload examples JSON via Files API (user pattern: [ex_file, xml]).
     - dry_run: if True, skip LLM and leave block text unchanged (for pipeline testing).
     - backend: "gemini" (default) or "local" (Ollama).
     - modality: "full" | "conservative" | "normalize" | "aggressive" — expansion style (prompt variant).
@@ -415,6 +446,7 @@ def expand_xml(
             api_key=api_key,
             block_tags=block_tags,
             input_file_path=input_file_path if pass_num == 0 else None,
+            examples_path=examples_path,
             dry_run=dry_run,
             backend=backend,
             modality=modality,
@@ -436,6 +468,7 @@ def _expand_once(
     api_key: str | None = None,
     block_tags: set[str] | None = None,
     input_file_path: Path | None = None,
+    examples_path: Path | str | None = None,
     dry_run: bool = False,
     *,
     backend: str = "gemini",
@@ -451,9 +484,10 @@ def _expand_once(
         model = _DEFAULT_GEMINI
 
     if whole_document and backend == "gemini" and not dry_run:
+        # When examples_path provided, upload examples file and pass [ex_file, xml]; else use input_file_path for XML if set
         client: Any = None
         uploaded_file: Any = None
-        if input_file_path is not None and input_file_path.exists():
+        if input_file_path is not None and input_file_path.exists() and not examples_path:
             from run_gemini import prepare_file_session
             client, uploaded_file = prepare_file_session(input_file_path, api_key)
         try:
@@ -463,6 +497,7 @@ def _expand_once(
                 model=model,
                 api_key=api_key,
                 modality=modality,
+                examples_path=examples_path,
                 client=client,
                 uploaded_file=uploaded_file,
             )
