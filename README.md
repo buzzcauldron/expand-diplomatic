@@ -95,10 +95,11 @@ python gui.py
 ### Settings
 
 - **Backend** – Use **Gemini** (online, needs API key) or **Local** (no key, uses rules or Ollama).
-- **Model** – Which Gemini model to use. Default is a good balance of speed and cost.
+- **Model** – Which Gemini model to use (hidden when Backend is Local). Default is a good balance of speed and cost.
 - **Modality** – Expansion style: full, conservative, normalize, aggressive, or **local** (tuned for non-Gemini models like Ollama; not the default).
 - **Parallel** – How many blocks to process at once. Lower this (e.g. 1) if you see rate limit errors.
-- **Auto-learn** – When on, the app saves new abbreviation pairs from each expansion to improve future runs.
+- **Learn** – When on, the app saves new abbreviation pairs from each expansion to improve future runs.
+- **Layered Training** – When on, includes learned examples in the expansion prompt (curated + learned).
 
 ### If expansion fails
 
@@ -110,7 +111,8 @@ python gui.py
 ### Extra features
 
 - **Input→TXT** / **Output→TXT** – Export text blocks to plain `.txt` files.
-- **Click to sync** – Click a block in input or output to jump to the matching block in the other panel.
+- **Click to sync** – Click a block in input or output to jump to the matching block in the other panel. Double-click to select the full block.
+- **Image panel** – Click the 🖼▶ strip on the right to expand and upload an image for reference.
 - **Passes** – Run expansion more than once in a row to refine the text.
 
 ---
@@ -138,7 +140,7 @@ Open `examples.json` in a text editor. Add pairs like this:
 ]
 ```
 
-More examples = better results. The app also saves learned pairs from expansions when **Auto-learn** is on.
+More examples = better results. The app also saves learned pairs from expansions when **Learn** is on. Use **Layered Training** to include those learned pairs in the prompt.
 
 ---
 

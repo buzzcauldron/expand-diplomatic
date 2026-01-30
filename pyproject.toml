@@ -4,16 +4,16 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "expand-diplomatic"
-version = "0.1.0"
+version = "0.2.0"
 description = "Expand diplomatic transcriptions to full form via Gemini API"
-# Semantic Versioning (semver): https://semver.org
-# 0.1.0 = initial release
+# Semantic Versioning: https://semver.org — keep in sync with expand_diplomatic/_version.py
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "google-genai>=1.0.0,<2.0.0",
     "lxml>=5.0.0,<7.0.0",
     "python-dotenv>=1.0.0,<2.0.0",
+    "Pillow>=10.0.0,<12.0.0",
 ]
 
 [project.optional-dependencies]
