@@ -87,15 +87,16 @@ python gui.py
 | **Open…** | Load an XML file |
 | **Expand** | Expand abbreviations (online with Gemini or locally) |
 | **Save…** | Save the expanded result |
-| **Re-expand** | Run expansion again on the current output |
+| **◀** / **▶** | Previous/next XML file in the same folder |
+| **Re-expand** | Re-expand from the original file; keeps original on left, new result on right. Uses updated examples and learned pairs. |
 
-**Keyboard shortcuts:** Ctrl+O (Open), Ctrl+S (Save), Ctrl+E (Expand)
+**Keyboard shortcuts:** Ctrl+O (Open), Ctrl+S (Save), Ctrl+E (Expand), Ctrl+← / Ctrl+→ (prev/next file in folder)
 
 ### Settings
 
 - **Backend** – Use **Gemini** (online, needs API key) or **Local** (no key, uses rules or Ollama).
 - **Model** – Which Gemini model to use. Default is a good balance of speed and cost.
-- **Modality** – Expansion style: full, conservative, normalize, or aggressive.
+- **Modality** – Expansion style: full, conservative, normalize, aggressive, or **local** (tuned for non-Gemini models like Ollama; not the default).
 - **Parallel** – How many blocks to process at once. Lower this (e.g. 1) if you see rate limit errors.
 - **Auto-learn** – When on, the app saves new abbreviation pairs from each expansion to improve future runs.
 
@@ -181,7 +182,7 @@ python -m expand_diplomatic --backend local --file document.xml
 
 ## Container (Docker)
 
-If you use Docker, you can run the app in a container:
+If you use Docker, you can run the app in a container. Builds default to your detected hardware (Apple Silicon → arm64, Intel/AMD → amd64).
 
 ```bash
 export GEMINI_API_KEY="your-api-key"
@@ -192,6 +193,13 @@ For local expansion only (no API key):
 ```bash
 ./run-container.sh --build -- --backend local --file sample.xml --out sample_expanded.xml
 ```
+
+**Build options:**
+- `./scripts/build-container-installs.sh` — Build for detected host (native arch)
+- `./scripts/build-container-installs.sh --all` — Build linux/amd64 and linux/arm64
+- `./scripts/build-docker.sh --load` — Same (native only); `--skip-ollama` for faster build
+
+On Apple Silicon, uses arm64 (native) by default, not amd64 (emulated).
 
 You need [Docker](https://docs.docker.com/get-docker/) installed and running.
 
@@ -216,7 +224,7 @@ Useful flags when running from the command line:
 
 - `--examples PATH` — Use a different examples file
 - `--model ID` — Change Gemini model (e.g. `gemini-2.5-pro`)
-- `--modality {full,conservative,normalize,aggressive}` — Expansion style
+- `--modality {full,conservative,normalize,aggressive,local}` — Expansion style (`local` is tuned for non-Gemini models)
 - `--passes N` — Run expansion multiple times (1–5)
 - `--files-api` — Upload the full file to Gemini for extra context
 

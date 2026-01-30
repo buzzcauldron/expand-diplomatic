@@ -319,7 +319,7 @@ def test_gemini_connection(
     try:
         run_gemini("Reply with exactly: OK", model="gemini-2.5-flash", api_key=key, timeout=timeout)
         return (True, "Connection OK. Gemini responded successfully.")
-    except TimeoutError as e:
+    except TimeoutError:
         return (
             False,
             f"Connection timed out (limit {timeout:.0f}s).\n"

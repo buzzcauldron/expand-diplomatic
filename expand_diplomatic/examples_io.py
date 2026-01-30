@@ -5,13 +5,22 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-DEFAULT_MAX_LEARNED = 500
+DEFAULT_MAX_LEARNED = 2000
 
 
 def get_learned_path(examples_path: str | Path) -> Path:
     """Path for learned examples file (alongside examples.json)."""
     p = Path(examples_path)
     return p.parent / "learned_examples.json"
+
+
+def _parse_pairs(data: list) -> list[dict[str, str]]:
+    """Parse list of dicts into validated pairs."""
+    out = []
+    for item in data:
+        if isinstance(item, dict) and "diplomatic" in item and "full" in item:
+            out.append({"diplomatic": str(item["diplomatic"]), "full": str(item["full"])})
+    return out
 
 
 def load_examples(path: str | Path, include_learned: bool = False) -> list[dict[str, str]]:
@@ -24,15 +33,9 @@ def load_examples(path: str | Path, include_learned: bool = False) -> list[dict[
             data = json.load(f)
     except json.JSONDecodeError as e:
         raise ValueError(f"Invalid JSON in {p}: {e}") from e
-    if not isinstance(data, list):
-        return []
-    out = []
-    for item in data:
-        if isinstance(item, dict) and "diplomatic" in item and "full" in item:
-            out.append({"diplomatic": str(item["diplomatic"]), "full": str(item["full"])})
+    out = _parse_pairs(data if isinstance(data, list) else [])
     if include_learned:
-        learned = load_learned(get_learned_path(p))
-        out = out + learned
+        out = out + load_learned(get_learned_path(p))
     return out
 
 
@@ -46,13 +49,7 @@ def load_learned(path: str | Path) -> list[dict[str, str]]:
             data = json.load(f)
     except (json.JSONDecodeError, OSError):
         return []
-    if not isinstance(data, list):
-        return []
-    out = []
-    for item in data:
-        if isinstance(item, dict) and "diplomatic" in item and "full" in item:
-            out.append({"diplomatic": str(item["diplomatic"]), "full": str(item["full"])})
-    return out
+    return _parse_pairs(data if isinstance(data, list) else [])
 
 
 def add_learned_pairs(

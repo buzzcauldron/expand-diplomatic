@@ -25,8 +25,10 @@ dev = [
 
 [project.scripts]
 expand-diplomatic = "expand_diplomatic.__main__:main"
+expand-diplomatic-gui = "gui:main"
+
 
 [tool.setuptools]
-py-modules = ["run_gemini"]
+py-modules = ["run_gemini", "gui"]
 packages = ["expand_diplomatic"]
 

@@ -37,13 +37,13 @@ from expand_diplomatic.examples_io import add_learned_pairs, get_learned_path, l
 
 DEFAULT_EXAMPLES = ROOT_DIR / "examples.json"
 BACKENDS = ("gemini", "local")
-MODALITIES = ("full", "conservative", "normalize", "aggressive")
+MODALITIES = ("full", "conservative", "normalize", "aggressive", "local")
 GEMINI_MODELS = (
     "gemini-2.5-flash",       # Best price-performance (default)
     "gemini-2.0-flash",       # Fast, good quality
+    "gemini-2.5-flash-lite",  # Fastest, most cost-efficient
     "gemini-3-flash-preview", # Latest Flash
-    "gemini-1.5-pro",         # Pro 1
-    "gemini-2.5-pro",         # Pro 2
+    "gemini-2.5-pro",         # Pro (stable)
     "gemini-3-pro-preview",   # Pro 3
 )
 DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
@@ -56,6 +56,16 @@ def _status(app: "App", msg: str) -> None:
 
 def _resolve_api_key(app: "App") -> str | None:
     return app.session_api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+
+
+def _show_pending_partial(app: "App") -> None:
+    """Display queued partial result with stream delay for visible progress."""
+    app.partial_display_after_id = None
+    if app.pending_partial is not None:
+        app.output_txt.delete("1.0", tk.END)
+        app.output_txt.insert("1.0", app.pending_partial)
+        app.output_txt.see(tk.END)
+        app.pending_partial = None
 
 
 def _schedule_auto_learn(
@@ -118,15 +128,21 @@ def _expand_worker(
         app.root.after(0, update_ui)
 
     def partial_cb(xml_result: str) -> None:
-        """Stream each block's result to the output panel."""
-
-        def update_output() -> None:
-            app.output_txt.delete("1.0", tk.END)
-            app.output_txt.insert("1.0", xml_result)
-            # Auto-scroll to end so user sees latest block
-            app.output_txt.see(tk.END)
-
-        app.root.after(0, update_output)
+        """Stream each block's result; pace updates for visible real-time progress."""
+        try:
+            delay = max(0, min(300, int(app.stream_delay_var.get().strip() or "0")))
+        except (ValueError, AttributeError):
+            delay = 0
+        app.pending_partial = xml_result
+        if app.partial_display_after_id is not None:
+            try:
+                app.root.after_cancel(app.partial_display_after_id)
+            except Exception:
+                pass
+        if delay <= 0:
+            app.root.after(0, lambda: _show_pending_partial(app))
+        else:
+            app.partial_display_after_id = app.root.after(delay, lambda: _show_pending_partial(app))
 
     result: str | None = None
     err: Exception | None = None
@@ -150,6 +166,13 @@ def _expand_worker(
     def on_done() -> None:
         from run_gemini import format_api_error
 
+        if app.partial_display_after_id is not None:
+            try:
+                app.root.after_cancel(app.partial_display_after_id)
+            except Exception:
+                pass
+            app.partial_display_after_id = None
+        app.pending_partial = None
         app.expand_btn.config(state=tk.NORMAL)
         app.progress_bar["value"] = 0
         app.time_label_var.set("")
@@ -383,8 +406,9 @@ def _run_expand_internal(
     retry: bool = False,
 ) -> None:
     # Always reload examples from disk (retrain) so Train additions are used on retry.
+    # "Use learned": include learned_examples.json in the prompt when checked (any backend).
     examples_path = Path(app.examples_var.get().strip() or str(DEFAULT_EXAMPLES))
-    include_learned = getattr(app, "auto_learn_var", None) and app.auto_learn_var.get()
+    include_learned = bool(getattr(app, "include_learned_var", None) and app.include_learned_var.get())
     try:
         examples = load_examples(examples_path, include_learned=bool(include_learned))
     except ValueError as e:
@@ -396,6 +420,7 @@ def _run_expand_internal(
             return
         if not examples and not messagebox.askyesno("No examples", "No examples loaded. Add pairs in Train or use examples.json. Continue anyway?"):
             return
+        app.original_input = xml
     # Use selected model from dropdown for Gemini, or default local model
     if backend == "gemini":
         model = app.gemini_model_var.get().strip() or app.model_gemini
@@ -448,6 +473,15 @@ class App:
         self.root.title(f"Expand diplomatic v{__version__}")
         self.root.minsize(600, 400)
         self.root.geometry("900x550")
+        _icon_path = ROOT_DIR / "stretch_armstrong_icon.png"
+        if _icon_path.exists():
+            try:
+                self._icon_img = tk.PhotoImage(file=str(_icon_path))
+                self.root.iconphoto(True, self._icon_img)
+            except Exception:
+                self._icon_img = None
+        else:
+            self._icon_img = None
 
         self.status_var = tk.StringVar(value="Idle")
         self.examples_var = tk.StringVar(value=str(DEFAULT_EXAMPLES))
@@ -459,11 +493,14 @@ class App:
         self.model_gemini: str = os.environ.get("GEMINI_MODEL", DEFAULT_GEMINI_MODEL)
         self.model_local: str = "llama3.2"
         self.last_expand_xml = ""
+        self.original_input = ""  # Source for Re-expand (set on Open/Expand)
         self.last_expand_api_key: str | None = None
         self.last_expand_backend = "gemini"
         self.last_expand_model = DEFAULT_GEMINI_MODEL
         self.last_dir: Path | None = None  # last Open/Save directory, for file dialogs
         self.last_input_path: Path | None = None  # last opened XML file (for TXT default names)
+        self.folder_files: list[Path] = []  # XML files in current folder for Prev/Next
+        self.folder_index: int = -1
         self.backend_var = tk.StringVar(value="gemini")
         self.modality_var = tk.StringVar(value="full")
         self.gemini_model_var = tk.StringVar(value=self.model_gemini)
@@ -475,6 +512,16 @@ class App:
         self.expand_running: bool = False
         self.hang_check_id: str | None = None
         self.auto_learn_var = tk.BooleanVar(value=True)
+        self.include_learned_var = tk.BooleanVar(value=False)
+        self.autosave_var = tk.BooleanVar(value=True)
+        self.autosave_after_id: str | None = None
+        self.autosave_idle_ms = 3000
+        self.stream_delay_var = tk.StringVar(value="80")
+        self.pending_partial: str | None = None
+        self.partial_display_after_id: str | None = None
+        self.image_path: Path | None = None
+        self._image_photo: tk.PhotoImage | None = None
+        self._image_panel_expanded = False
 
         self._build_toolbar()
         self._build_main()
@@ -483,77 +530,249 @@ class App:
 
     def _build_toolbar(self) -> None:
         bar = tk.Frame(self.root, relief=tk.RAISED, bd=1)
+        self._toolbar_frame = bar
         bar.pack(side=tk.TOP, fill=tk.X, padx=2, pady=2)
-        # Primary actions
-        tk.Button(bar, text="Open…", command=self._on_open).pack(side=tk.LEFT, padx=2, pady=2)
-        self.expand_btn = tk.Button(bar, text="Expand", command=self._on_expand)
-        self.expand_btn.pack(side=tk.LEFT, padx=2, pady=2)
-        tk.Button(bar, text="Re-expand", command=self._on_reexpand).pack(side=tk.LEFT, padx=2, pady=2)
-        tk.Button(bar, text="Save…", command=self._on_save).pack(side=tk.LEFT, padx=2, pady=2)
-        tk.Button(bar, text="Input→TXT", command=self._on_save_input_txt).pack(side=tk.LEFT, padx=2, pady=2)
-        tk.Button(bar, text="Output→TXT", command=self._on_save_output_txt).pack(side=tk.LEFT, padx=2, pady=2)
-        # Visual separator between actions and settings
-        sep = ttk.Separator(bar, orient=tk.VERTICAL)
-        sep.pack(side=tk.LEFT, fill=tk.Y, padx=6, pady=4)
-        # Settings
-        tk.Label(bar, text="Backend:").pack(side=tk.LEFT, padx=(0, 0), pady=2)
-        tk.OptionMenu(bar, self.backend_var, *BACKENDS).pack(side=tk.LEFT, padx=2, pady=2)
-        tk.Label(bar, text="Model:").pack(side=tk.LEFT, padx=(8, 0), pady=2)
-        tk.OptionMenu(bar, self.gemini_model_var, *GEMINI_MODELS).pack(side=tk.LEFT, padx=2, pady=2)
-        tk.Label(bar, text="Modality:").pack(side=tk.LEFT, padx=(8, 0), pady=2)
-        tk.OptionMenu(bar, self.modality_var, *MODALITIES).pack(side=tk.LEFT, padx=2, pady=2)
-        tk.Label(bar, text="Parallel:").pack(side=tk.LEFT, padx=(8, 0), pady=2)
+        pad = dict(padx=1, pady=1)
+        opts = {"font": ("", 8), "takefocus": True}
+        # Row 0: Primary actions
+        r1 = tk.Frame(bar)
+        r1.pack(side=tk.TOP, fill=tk.X)
+        c = 0
+        for w in [
+            (tk.Button, "Open", self._on_open, {"width": 4}),
+            (tk.Button, "Expand", self._on_expand, {"width": 5}),
+            (tk.Button, "Re-expand", self._on_reexpand, {"width": 8}),
+            (tk.Button, "Save", self._on_save, {"width": 4}),
+            (tk.Button, "◀", self._on_prev_file, {"width": 2}),
+            (tk.Button, "▶", self._on_next_file, {"width": 2}),
+            (tk.Button, "In→TXT", self._on_save_input_txt, {"width": 5}),
+            (tk.Button, "Out→TXT", self._on_save_output_txt, {"width": 6}),
+        ]:
+            cls, txt, cmd, kw = w
+            btn = cls(r1, text=txt, command=cmd, **{**pad, **kw})
+            btn.pack(side=tk.LEFT, **pad)
+            if txt == "Expand":
+                self.expand_btn = btn
+        # Row 1: Settings (grid so Examples entry expands)
+        r2 = tk.Frame(bar)
+        r2.pack(side=tk.TOP, fill=tk.X)
+        r2.columnconfigure(16, weight=1, minsize=80)  # Examples entry expands
+        col = 0
+        tk.Label(r2, text="Backend", **opts).grid(row=0, column=col, **pad)
+        col += 1
+        tk.OptionMenu(r2, self.backend_var, *BACKENDS, command=self._on_backend_change).grid(row=0, column=col, sticky=tk.W, **pad)
+        col += 1
+        self._model_label = tk.Label(r2, text="Model", **opts)
+        self._model_label.grid(row=0, column=col, **pad)
+        col += 1
+        self._model_menu = tk.OptionMenu(r2, self.gemini_model_var, *GEMINI_MODELS)
+        self._model_menu.grid(row=0, column=col, sticky=tk.W, **pad)
+        col += 1
+        tk.Label(r2, text="Mod", **opts).grid(row=0, column=col, **pad)
+        col += 1
+        tk.OptionMenu(r2, self.modality_var, *MODALITIES).grid(row=0, column=col, sticky=tk.W, **pad)
+        col += 1
+        tk.Label(r2, text="∥", **opts).grid(row=0, column=col, **pad)
+        col += 1
         self.concurrent_var = tk.StringVar(value="2")
-        sp = tk.Spinbox(bar, from_=1, to=8, width=3, textvariable=self.concurrent_var)
-        sp.pack(side=tk.LEFT, padx=2, pady=2)
-        tk.Label(bar, text="Passes (1–5):").pack(side=tk.LEFT, padx=(8, 0), pady=2)
+        tk.Spinbox(r2, from_=1, to=8, width=2, textvariable=self.concurrent_var).grid(row=0, column=col, sticky=tk.W, **pad)
+        col += 1
+        tk.Label(r2, text="Pass", **opts).grid(row=0, column=col, **pad)
+        col += 1
         self.passes_var = tk.StringVar(value="1")
-        sp2 = tk.Spinbox(bar, from_=1, to=5, width=2, textvariable=self.passes_var)
-        sp2.pack(side=tk.LEFT, padx=2, pady=2)
-        tk.Checkbutton(bar, text="Auto-learn", variable=self.auto_learn_var).pack(side=tk.LEFT, padx=(8, 2), pady=2)
-        tk.Label(bar, text="Examples:").pack(side=tk.LEFT, padx=(4, 0), pady=2)
-        ex = tk.Entry(bar, textvariable=self.examples_var, width=32)
-        ex.pack(side=tk.LEFT, padx=2, pady=2)
-        tk.Button(bar, text="…", width=2, command=self._on_browse_examples).pack(side=tk.LEFT, padx=0, pady=2)
-        tk.Button(bar, text="Refresh", command=self._refresh_train_list).pack(side=tk.LEFT, padx=2, pady=2)
-        tk.Button(bar, text="Test connection", command=self._on_test_connection).pack(side=tk.LEFT, padx=2, pady=2)
-        # Keyboard shortcuts (Ctrl+O/S/E)
+        tk.Spinbox(r2, from_=1, to=5, width=2, textvariable=self.passes_var).grid(row=0, column=col, sticky=tk.W, **pad)
+        col += 1
+        tk.Checkbutton(r2, text="Learn", variable=self.auto_learn_var, **opts).grid(row=0, column=col, sticky=tk.W, **pad)
+        col += 1
+        tk.Checkbutton(r2, text="Learned", variable=self.include_learned_var, **opts).grid(row=0, column=col, sticky=tk.W, **pad)
+        col += 1
+        tk.Checkbutton(r2, text="Auto", variable=self.autosave_var, **opts).grid(row=0, column=col, sticky=tk.W, **pad)
+        col += 1
+        tk.Label(r2, text="Stream", **opts).grid(row=0, column=col, **pad)
+        col += 1
+        tk.Spinbox(r2, from_=0, to=300, width=3, textvariable=self.stream_delay_var).grid(row=0, column=col, sticky=tk.W, **pad)
+        col += 1
+        tk.Label(r2, text="Examples", **opts).grid(row=0, column=col, sticky=tk.W, **pad)
+        col += 1
+        self._examples_entry = tk.Entry(r2, textvariable=self.examples_var)
+        self._examples_entry.grid(row=0, column=col, sticky=tk.EW, **pad)
+        col += 1
+        tk.Button(r2, text="…", width=2, command=self._on_browse_examples).grid(row=0, column=col, **pad)
+        col += 1
+        tk.Button(r2, text="Refresh", width=6, command=self._refresh_train_list).grid(row=0, column=col, **pad)
+        col += 1
+        tk.Button(r2, text="Test", width=4, command=self._on_test_connection).grid(row=0, column=col, **pad)
+        # Keyboard shortcuts (Ctrl+O/S/E, Left/Right for prev/next file)
         self.root.bind("<Control-o>", lambda e: (self._on_open(), "break")[1])
         self.root.bind("<Control-s>", lambda e: (self._on_save(), "break")[1])
         self.root.bind("<Control-e>", lambda e: (self._on_expand(), "break")[1])
+        self.root.bind("<Control-Left>", lambda e: (self._on_prev_file(), "break")[1])
+        self.root.bind("<Control-Right>", lambda e: (self._on_next_file(), "break")[1])
+        self._on_backend_change(self.backend_var.get())
+
+    def _on_backend_change(self, backend: str) -> None:
+        """Show or hide Gemini model dropdown based on backend."""
+        if backend.strip().lower() == "local":
+            self._model_label.grid_remove()
+            self._model_menu.grid_remove()
+        else:
+            self._model_label.grid()
+            self._model_menu.grid()
 
     def _build_main(self) -> None:
         panes = tk.Frame(self.root)
         panes.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=4, pady=2)
-        left = tk.LabelFrame(panes, text="Input (XML) — click block to sync")
+        left = tk.LabelFrame(panes, text="Input (XML)")
         left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=2)
         opts = {"wrap": tk.WORD, "font": self._font}
         self.input_txt = scrolledtext.ScrolledText(left, **opts)
         self.input_txt.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
-        right = tk.LabelFrame(panes, text="Output (expanded) — click block to sync")
+        right = tk.LabelFrame(panes, text="Output (expanded)")
         right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=2)
         self.output_txt = scrolledtext.ScrolledText(right, **opts)
         self.output_txt.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
         self.input_txt.bind("<Button-1>", self._on_panel_click)
         self.output_txt.bind("<Button-1>", self._on_panel_click)
+        self.input_txt.bind("<Double-Button-1>", self._on_panel_double_click)
+        self.output_txt.bind("<Double-Button-1>", self._on_panel_double_click)
+        self.input_txt.bind("<KeyRelease>", self._on_input_activity)
+
+        # Third panel: image (collapsible, collapsed by default)
+        self._image_right = tk.Frame(panes)
+        self._image_right.pack(side=tk.LEFT, fill=tk.BOTH, padx=2)
+        self._image_collapsed_strip = tk.Frame(self._image_right, width=28, bg="SystemButtonFace")
+        self._image_collapsed_strip.pack(side=tk.LEFT, fill=tk.Y, padx=0, pady=0)
+        self._image_collapsed_strip.pack_propagate(False)
+        tk.Button(
+            self._image_collapsed_strip, text="🖼\n▶", font=("", 9), width=3,
+            command=self._toggle_image_panel,
+        ).pack(fill=tk.BOTH, expand=True)
+        self._image_panel = tk.LabelFrame(self._image_right, text="Image")
+        img_header = tk.Frame(self._image_panel)
+        img_header.pack(fill=tk.X, padx=2, pady=2)
+        tk.Button(img_header, text="Upload…", command=self._on_upload_image, width=8).pack(side=tk.LEFT, padx=(0, 4))
+        tk.Button(img_header, text="◀", width=2, command=self._toggle_image_panel).pack(side=tk.LEFT)
+        self._image_canvas = tk.Canvas(self._image_panel, bg="gray90", highlightthickness=0)
+        self._image_canvas.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
+        self._image_canvas.bind("<Configure>", self._on_image_canvas_configure)
+        self._image_panel.configure(width=280)
+        self._image_panel.pack_propagate(True)
+
+    def _toggle_image_panel(self) -> None:
+        """Expand or collapse the image panel."""
+        if self._image_panel_expanded:
+            self._image_panel.pack_forget()
+            self._image_collapsed_strip.pack(side=tk.LEFT, fill=tk.Y, padx=0, pady=0)
+            self._image_panel_expanded = False
+        else:
+            self._image_collapsed_strip.pack_forget()
+            self._image_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=0, pady=0)
+            self._image_panel_expanded = True
+            if self.image_path is not None:
+                self.root.after(50, lambda: self._display_image(self.image_path))
+
+    def _on_upload_image(self) -> None:
+        """Open file dialog and load an image."""
+        d = self._file_dialog_dir()
+        path = filedialog.askopenfilename(
+            title="Select image",
+            initialdir=str(d),
+            filetypes=[
+                ("All images", "*.png *.jpg *.jpeg *.gif *.bmp *.webp *.tiff *.tif *.ico"),
+                ("PNG", "*.png"),
+                ("JPEG", "*.jpg *.jpeg"),
+                ("All files", "*.*"),
+            ],
+        )
+        if not path:
+            return
+        p = Path(path)
+        try:
+            self.image_path = p
+            self._display_image(p)
+            _status(self, f"Image: {p.name}")
+        except Exception as e:
+            messagebox.showerror("Image", f"Could not load image: {e}")
+
+    def _on_image_canvas_configure(self, event: tk.Event) -> None:
+        """Rescale image when canvas is resized."""
+        if self.image_path is not None and event.width > 10 and event.height > 10:
+            self._display_image(self.image_path)
+
+    def _display_image(self, path: Path) -> None:
+        """Display image in the canvas, scaled to fit."""
+        try:
+            from PIL import Image, ImageTk
+            img = Image.open(path)
+            if img.mode not in ("RGB", "RGBA"):
+                img = img.convert("RGB")
+            cw = max(40, self._image_canvas.winfo_width() or 260)
+            ch = max(40, self._image_canvas.winfo_height() or 200)
+            img.thumbnail((cw, ch), Image.LANCZOS)
+            self._image_photo = ImageTk.PhotoImage(img)
+            self._image_canvas.delete("all")
+            cx, cy = cw // 2, ch // 2
+            self._image_canvas.create_image(cx, cy, image=self._image_photo, anchor=tk.CENTER)
+        except Exception:
+            pass
+
+    def _on_input_activity(self, event: tk.Event) -> None:
+        """Schedule autosave when input goes idle."""
+        if self.autosave_after_id is not None:
+            try:
+                self.root.after_cancel(self.autosave_after_id)
+            except Exception:
+                pass
+            self.autosave_after_id = None
+        if not getattr(self, "autosave_var", None) or not self.autosave_var.get():
+            return
+
+        def do_autosave() -> None:
+            self.autosave_after_id = None
+            self._do_autosave()
+
+        self.autosave_after_id = self.root.after(self.autosave_idle_ms, do_autosave)
+
+    def _do_autosave(self) -> None:
+        """Save input to file when idle. Uses last_input_path or autosave.xml."""
+        if not getattr(self, "autosave_var", None) or not self.autosave_var.get():
+            return
+        if self.expand_running:
+            return
+        xml = self.input_txt.get("1.0", tk.END)
+        if not xml.strip():
+            return
+        path = getattr(self, "last_input_path", None)
+        if path is None:
+            base = self._file_dialog_dir()
+            path = base / "autosave.xml"
+            self.last_input_path = path
+            self.last_dir = base
+        try:
+            path.write_text(xml, encoding="utf-8")
+            _status(self, f"Autosaved {path.name}")
+        except Exception:
+            pass
 
     def _build_train(self) -> None:
         tr = tk.LabelFrame(self.root, text="Train (add examples)")
         tr.pack(side=tk.TOP, fill=tk.X, padx=4, pady=2)
         row = tk.Frame(tr)
         row.pack(fill=tk.X, padx=2, pady=2)
-        tk.Label(row, text="Diplomatic:").pack(side=tk.LEFT, padx=2)
+        row.columnconfigure(1, weight=1)  # Diplomatic entry
+        row.columnconfigure(4, weight=1)  # Full entry
+        tk.Label(row, text="Diplomatic:").grid(row=0, column=0, sticky=tk.W, padx=(0, 2), pady=2)
         self.dip_var = tk.StringVar()
-        dip_entry = tk.Entry(row, textvariable=self.dip_var, width=24)
-        dip_entry.pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
-        tk.Button(row, text="From input", command=self._on_dip_from_input, width=9).pack(side=tk.LEFT, padx=(0, 2))
-        tk.Label(row, text="Full:").pack(side=tk.LEFT, padx=(8, 2))
+        dip_entry = tk.Entry(row, textvariable=self.dip_var)
+        dip_entry.grid(row=0, column=1, sticky=tk.EW, padx=2, pady=2)
+        tk.Button(row, text="From input", command=self._on_dip_from_input, width=8).grid(row=0, column=2, padx=2, pady=2)
+        tk.Label(row, text="Full:").grid(row=0, column=3, sticky=tk.W, padx=(8, 2), pady=2)
         self.full_var = tk.StringVar()
-        full_entry = tk.Entry(row, textvariable=self.full_var, width=24)
-        full_entry.pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
-        tk.Button(row, text="From output", command=self._on_full_from_output, width=10).pack(side=tk.LEFT, padx=(0, 2))
-        add_btn = tk.Button(row, text="Add pair", command=self._on_add_example)
-        add_btn.pack(side=tk.LEFT, padx=4)
+        full_entry = tk.Entry(row, textvariable=self.full_var)
+        full_entry.grid(row=0, column=4, sticky=tk.EW, padx=2, pady=2)
+        tk.Button(row, text="From output", command=self._on_full_from_output, width=9).grid(row=0, column=5, padx=2, pady=2)
+        add_btn = tk.Button(row, text="Add pair", command=self._on_add_example, width=8)
+        add_btn.grid(row=0, column=6, padx=4, pady=2)
         def _add_on_ctrl_return(_e) -> str:
             self._on_add_example()
             return "break"
@@ -567,24 +786,21 @@ class App:
     def _build_status(self) -> None:
         status_frame = tk.Frame(self.root)
         status_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=4, pady=2)
-        # Status text label
-        tk.Label(status_frame, textvariable=self.status_var, anchor=tk.W, width=30).pack(
-            side=tk.LEFT, padx=(0, 8)
+        status_frame.columnconfigure(1, weight=1)
+        tk.Label(status_frame, textvariable=self.status_var, anchor=tk.W).grid(
+            row=0, column=0, sticky=tk.W, padx=(0, 8), pady=2
         )
-        # Progress bar
         self.progress_bar = ttk.Progressbar(
-            status_frame, orient=tk.HORIZONTAL, length=200, mode="determinate"
+            status_frame, orient=tk.HORIZONTAL, mode="determinate"
         )
-        self.progress_bar.pack(side=tk.LEFT, padx=4)
-        # Elapsed time label
-        tk.Label(status_frame, textvariable=self.time_label_var, width=8, anchor=tk.W).pack(
-            side=tk.LEFT, padx=4
+        self.progress_bar.grid(row=0, column=1, sticky=tk.EW, padx=4, pady=2)
+        tk.Label(status_frame, textvariable=self.time_label_var, width=6, anchor=tk.W).grid(
+            row=0, column=2, sticky=tk.W, padx=4, pady=2
         )
-        # Cancel button (only enabled during expansion)
         self.cancel_btn = tk.Button(
             status_frame, text="Cancel", command=self._on_cancel_expand, state=tk.DISABLED
         )
-        self.cancel_btn.pack(side=tk.LEFT, padx=4)
+        self.cancel_btn.grid(row=0, column=3, padx=4, pady=2)
 
     def _on_panel_click(self, event: tk.Event) -> None:
         """On click in input or output, select the parallel block in the other panel."""
@@ -622,11 +838,63 @@ class App:
         other.mark_set("insert", start_idx)
         other.see(start_idx)
 
+    def _on_panel_double_click(self, event: tk.Event) -> None:
+        """On double-click, snap selection to the entire block at clicked position in both panels."""
+        widget = event.widget
+        try:
+            idx = widget.index(f"@{event.x},{event.y}")
+        except Exception:
+            return
+        if not idx:
+            return
+        content = widget.get("1.0", tk.END)
+        try:
+            char_offset = widget.count("1.0", idx, "chars")[0]
+        except Exception:
+            return
+        from expand_diplomatic.expander import get_block_ranges
+        ranges = get_block_ranges(content)
+        block_idx = None
+        for i, (start, end) in enumerate(ranges):
+            if start <= char_offset < end:
+                block_idx = i
+                break
+        if block_idx is None:
+            return
+        # Select full block in clicked widget
+        start, end = ranges[block_idx]
+        start_idx = widget.index(f"1.0 + {start} chars")
+        end_idx = widget.index(f"1.0 + {end} chars")
+        widget.tag_remove("sel", "1.0", tk.END)
+        widget.tag_add("sel", start_idx, end_idx)
+        widget.mark_set("insert", start_idx)
+        widget.see(start_idx)
+        # Sync selection to corresponding block in other panel
+        other = self.output_txt if widget is self.input_txt else self.input_txt
+        other_content = other.get("1.0", tk.END)
+        other_ranges = get_block_ranges(other_content)
+        if block_idx < len(other_ranges):
+            o_start, o_end = other_ranges[block_idx]
+            o_start_idx = other.index(f"1.0 + {o_start} chars")
+            o_end_idx = other.index(f"1.0 + {o_end} chars")
+            other.tag_remove("sel", "1.0", tk.END)
+            other.tag_add("sel", o_start_idx, o_end_idx)
+            other.mark_set("insert", o_start_idx)
+            other.see(o_start_idx)
+        return "break"  # Prevent default word selection
+
     def _file_dialog_dir(self) -> Path:
-        """Directory to use as initialdir for Open/Save/browse dialogs."""
+        """Directory for file dialogs: last path from any file selection, else examples dir, else project root."""
         d = self.last_dir
         if d is not None and d.is_dir():
             return d
+        if self.last_input_path is not None:
+            p = self.last_input_path.parent
+            if p.is_dir():
+                return p
+        ex = Path(self.examples_var.get().strip() or str(DEFAULT_EXAMPLES))
+        if ex.parent.is_dir():
+            return ex.parent
         return ROOT_DIR
 
     def _on_open(self) -> None:
@@ -642,9 +910,41 @@ class App:
             text = p.read_text(encoding="utf-8")
             self.input_txt.delete("1.0", tk.END)
             self.input_txt.insert("1.0", text)
+            self.original_input = text
             self.last_dir = p.parent
             self.last_input_path = p
+            self.folder_files = sorted(p.parent.glob("*.xml"))
+            self.folder_index = next((i for i, f in enumerate(self.folder_files) if f.resolve() == p.resolve()), -1)
             _status(self, f"Loaded {p.name}")
+        except Exception as e:
+            messagebox.showerror("Open failed", str(e))
+
+    def _load_file(self, p: Path) -> None:
+        """Load XML from path into input."""
+        text = p.read_text(encoding="utf-8")
+        self.input_txt.delete("1.0", tk.END)
+        self.input_txt.insert("1.0", text)
+        self.original_input = text
+        self.last_input_path = p
+        _status(self, f"Loaded {p.name}")
+
+    def _on_prev_file(self) -> None:
+        """Load previous XML file in folder. Left arrow."""
+        if not self.folder_files or self.folder_index <= 0:
+            return
+        self.folder_index -= 1
+        try:
+            self._load_file(self.folder_files[self.folder_index])
+        except Exception as e:
+            messagebox.showerror("Open failed", str(e))
+
+    def _on_next_file(self) -> None:
+        """Load next XML file in folder. Right arrow."""
+        if not self.folder_files or self.folder_index < 0 or self.folder_index >= len(self.folder_files) - 1:
+            return
+        self.folder_index += 1
+        try:
+            self._load_file(self.folder_files[self.folder_index])
         except Exception as e:
             messagebox.showerror("Open failed", str(e))
 
@@ -664,10 +964,10 @@ class App:
         _run_expand_internal(self, xml, api_key, backend, retry=False)
 
     def _on_reexpand(self) -> None:
-        """Use output as input and expand again (recursive correction)."""
-        xml = self.output_txt.get("1.0", tk.END)
+        """Re-expand from original file; show original on left, new result on right. Uses updated examples+learned."""
+        xml = getattr(self, "original_input", "") or ""
         if not xml.strip():
-            messagebox.showwarning("Re-expand", "Output is empty. Run Expand first.")
+            messagebox.showwarning("Re-expand", "No original. Open a file or run Expand first.")
             return
         self.input_txt.delete("1.0", tk.END)
         self.input_txt.insert("1.0", xml)
@@ -714,9 +1014,13 @@ class App:
         t.start()
 
     def _on_save(self) -> None:
+        default_name = ""
+        if self.last_input_path is not None:
+            default_name = f"{self.last_input_path.stem}_expanded.xml"
         path = filedialog.asksaveasfilename(
             title="Save output",
             initialdir=str(self._file_dialog_dir()),
+            initialfile=default_name,
             defaultextension=".xml",
             filetypes=[("XML", "*.xml"), ("All", "*.*")],
         )
@@ -856,5 +1160,10 @@ class App:
         self.root.mainloop()
 
 
-if __name__ == "__main__":
+def main() -> None:
+    """Entry point for expand-diplomatic-gui."""
     App().run()
+
+
+if __name__ == "__main__":
+    main()

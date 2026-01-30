@@ -2,8 +2,8 @@
 # Run expand_diplomatic in Docker (Mac, Linux, Windows via WSL2).
 # Usage: ./run-container.sh [--workspace DIR] [--build] [--platform PLAT] [--] [expand_diplomatic args...]
 #   --workspace DIR   Mount DIR at /workspace (default: current directory)
-#   --build           Build image before run (native arch only; use scripts/build-docker.sh for multi-arch)
-#   --platform PLAT   Use image for PLAT (linux/amd64, linux/arm64). Default: host.
+#   --build           Build image for detected host before run (prefers native arch; Apple Silicon -> arm64)
+#   --platform PLAT   Use image for PLAT (linux/amd64, linux/arm64). Default: detected host.
 #   --                Remaining args passed to expand_diplomatic (paths relative to workspace)
 #
 # Examples:
@@ -54,7 +54,16 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -n "$DO_BUILD" ]] || ! docker image inspect "$IMAGE_NAME" &>/dev/null; then
-  docker build -t "$IMAGE_NAME" -f "$SCRIPT_DIR/Dockerfile" "$SCRIPT_DIR"
+  if [[ -z "$PLATFORM" ]]; then
+    case "$(uname -m 2>/dev/null)" in
+      arm64|aarch64) PLATFORM="linux/arm64" ;;
+      *)             PLATFORM="linux/amd64" ;;
+    esac
+    echo "Building for $PLATFORM..."
+  fi
+  opts=(-t "$IMAGE_NAME" -f "$SCRIPT_DIR/Dockerfile" "$SCRIPT_DIR")
+  [[ -n "$PLATFORM" ]] && opts+=(--platform "$PLATFORM")
+  docker build "${opts[@]}"
 fi
 
 run_opts=(--rm -v "$WORKSPACE:/workspace" -w /workspace)
