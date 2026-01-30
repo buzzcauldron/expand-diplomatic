@@ -72,7 +72,8 @@ def _is_pro_model(model: str) -> bool:
 
 
 def load_examples(path: str | Path, include_learned: bool = False) -> list[dict[str, str]]:
-    """Load example pairs from JSON. Each item: {"diplomatic": "...", "full": "..."}. Cached by mtime."""
+    """Load example pairs from JSON. Each item: {"diplomatic": "...", "full": "..."}. Cached by mtime.
+    If path does not exist and include_learned=True, returns only learned pairs (from learned_examples.json)."""
     p = Path(path)
     if not p.exists():
         return [] if not include_learned else load_learned(get_learned_path(p))

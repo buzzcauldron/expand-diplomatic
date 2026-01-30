@@ -245,7 +245,6 @@ def _expand_whole_document(
     api_key: str | None,
     modality: str = "full",
     *,
-    input_file_path: Path | None = None,
     client: Any = None,
     uploaded_file: Any = None,
 ) -> str:
@@ -277,7 +276,16 @@ def _expand_whole_document(
         s = s[3:]
     if s.endswith("```"):
         s = s[:-3]
-    return s.strip()
+    s = s.strip()
+
+    # Validate XML; on parse failure raise helpful error
+    try:
+        etree.fromstring(s.encode("utf-8"), etree.XMLParser(recover=True))
+    except etree.XMLSyntaxError as e:
+        raise ValueError(
+            f"Model returned invalid XML: {e}. Try block-by-block mode (uncheck Whole doc) or retry."
+        ) from e
+    return s
 
 
 def _inner_text(el: etree._Element) -> str:
@@ -396,7 +404,10 @@ def expand_xml(
         if cancel_check is not None and cancel_check():
             raise ExpandCancelled("Expansion cancelled by user.")
         if progress_callback is not None:
-            progress_callback(1, 1, f"Pass {pass_num + 1}/{passes}" if passes > 1 else "Expanding…")
+            msg = "Expanding whole document…" if whole_document else "Expanding…"
+            if passes > 1:
+                msg = f"Pass {pass_num + 1}/{passes}: {msg}"
+            progress_callback(1, 1, msg)
         current = _expand_once(
             current,
             examples,
@@ -452,7 +463,6 @@ def _expand_once(
                 model=model,
                 api_key=api_key,
                 modality=modality,
-                input_file_path=input_file_path,
                 client=client,
                 uploaded_file=uploaded_file,
             )

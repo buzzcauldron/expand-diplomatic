@@ -126,7 +126,7 @@ def _expand_worker(
 
     def progress_cb(current: int, total: int, _msg: str) -> None:
         last_progress_time[0] = time.time()
-        s = f"block {current}/{total}" if total > 0 else "Processing…"
+        s = _msg if (total == 1 and _msg) else (f"block {current}/{total}" if total > 0 else "Processing…")
         pct = int(100 * current / total) if total > 0 else 0
 
         def update_ui() -> None:
