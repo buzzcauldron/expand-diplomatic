@@ -6,6 +6,13 @@ The project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ## [Unreleased]
 
+### Added
+
+- High-end GPU detection (NVIDIA or AMD >= 8GB VRAM): triggers aggressive local training when on AC power (disabled on battery)
+  - Local parallelism 12 (vs 6); Ollama num_ctx=8192; Layered Training default on
+  - Auto-learn cap 4000 when GPU; Parallel spinbox to 16 when local
+  - Env: EXPANDER_AGGRESSIVE_LOCAL (force on/off), EXPANDER_GPU_VRAM_MB (threshold)
+
 ### Changed
 
 - Speed: local rules pre-sort examples once per document (avoids per-block sort)
