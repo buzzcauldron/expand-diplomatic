@@ -55,7 +55,7 @@ def _run_one(
     dry_run: bool = False,
     max_concurrent: int | None = None,
     passes: int = 1,
-    whole_document: bool = True,
+    whole_document: bool = False,
 ) -> None:
     from .expander import expand_xml
 
@@ -182,7 +182,7 @@ def _run_expand(args: argparse.Namespace) -> None:
         mc = None
     passes = getattr(args, "passes", 1) or 1
     passes = max(1, min(5, passes))
-    whole_document = not getattr(args, "block_by_block", False)
+    whole_document = getattr(args, "whole_doc", False)  # Default: block-by-block
 
     ex_path = Path(args.examples) if whole_document and backend == "gemini" else None
 
@@ -205,7 +205,11 @@ def _run_expand(args: argparse.Namespace) -> None:
         )
 
     if args.text is not None:
-        run(args.text, args.out)
+        try:
+            run(args.text, args.out)
+        except ValueError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
         return
 
     if args.file is not None:
@@ -214,7 +218,11 @@ def _run_expand(args: argparse.Namespace) -> None:
             sys.exit(1)
         xml = args.file.read_text(encoding="utf-8")
         out_path = args.out or (args.file.parent / f"{args.file.stem}_expanded.xml")
-        run(xml, out_path, fpath=args.file, files_api=args.files_api)
+        try:
+            run(xml, out_path, fpath=args.file, files_api=args.files_api)
+        except ValueError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
         return
 
     files: list[Path] = []
@@ -393,7 +401,12 @@ def main() -> None:
     ap.add_argument(
         "--block-by-block",
         action="store_true",
-        help="Expand each block separately (default: whole document in one call)",
+        help="Expand each block separately (default)",
+    )
+    ap.add_argument(
+        "--whole-doc",
+        action="store_true",
+        help="Expand entire document in one API call (instead of block-by-block)",
     )
     ap.add_argument("--version", "-V", action="version", version=__import__("expand_diplomatic._version", fromlist=["__version__"]).__version__)
     args = ap.parse_args(expand_argv)

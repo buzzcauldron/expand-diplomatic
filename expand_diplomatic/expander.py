@@ -69,6 +69,8 @@ def get_block_ranges(xml_source: str, block_tags: set[str] | None = None) -> lis
         root = etree.fromstring(xml_source.encode("utf-8"), etree.XMLParser(recover=True, remove_blank_text=False))
     except etree.XMLSyntaxError:
         return []
+    if root is None:
+        return []
     ranges: list[tuple[int, int]] = []
     search_start = 0
 
@@ -119,6 +121,8 @@ def extract_expansion_pairs(
             root = etree.fromstring(xml_str.encode("utf-8"), parser)
         except etree.XMLSyntaxError:
             return []
+        if root is None:
+            return []
 
         blocks = []
         for el in root.iter():
@@ -149,6 +153,8 @@ def extract_text_lines(xml_source: str, block_tags: set[str] | None = None) -> s
     try:
         root = etree.fromstring(xml_source.encode("utf-8"), etree.XMLParser(recover=True, remove_blank_text=False))
     except etree.XMLSyntaxError:
+        return ""
+    if root is None:
         return ""
     lines: list[str] = []
 
@@ -405,7 +411,7 @@ def expand_xml(
     max_concurrent: int | None = None,
     passes: int = 1,
     cancel_check: Callable[[], bool] | None = None,
-    whole_document: bool = True,
+    whole_document: bool = False,
 ) -> str:
     """
     Parse XML, expand text inside block elements via LLM, return modified XML string.
@@ -425,7 +431,7 @@ def expand_xml(
     - max_concurrent: max parallel blocks (default from EXPANDER_MAX_CONCURRENT env or 2 gemini / 6 local).
     - passes: number of expansion passes (default 1). When > 1, re-expands output to refine further.
     - cancel_check: optional () -> bool; if returns True, expansion stops and raises ExpandCancelled.
-    - whole_document: when True and backend=gemini, expand entire document in one API call (default True).
+    - whole_document: when True and backend=gemini, expand entire document in one API call (default False).
     """
     if model is None:
         model = _DEFAULT_GEMINI
@@ -456,6 +462,8 @@ def expand_xml(
             cancel_check=cancel_check,
             whole_document=whole_document,
         )
+        if cancel_check is not None and cancel_check():
+            raise ExpandCancelled("Expansion cancelled by user.")
         if whole_document and partial_result_callback is not None:
             partial_result_callback(current)
     return current
@@ -477,7 +485,7 @@ def _expand_once(
     partial_result_callback: Callable[[str], None] | None = None,
     max_concurrent: int | None = None,
     cancel_check: Callable[[], bool] | None = None,
-    whole_document: bool = True,
+    whole_document: bool = False,
 ) -> str:
     """Single expansion pass. Used internally by expand_xml for recursive correction."""
     if model is None:
@@ -508,6 +516,8 @@ def _expand_once(
 
     tags = block_tags or TEXT_BLOCK_TAGS
     root = etree.fromstring(xml_source.encode("utf-8"), etree.XMLParser(recover=True, remove_blank_text=False))
+    if root is None:
+        raise ValueError("Invalid or empty XML: parser returned no root element. Check input is valid XML.")
 
     blocks: list[tuple[etree._Element, str]] = []
     for el in root.iter():

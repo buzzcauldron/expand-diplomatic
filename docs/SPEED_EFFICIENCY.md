@@ -2,6 +2,7 @@
 
 ## Implemented optimizations
 
+- **ideasrule-style startup**: GUI uses `FALLBACK_MODELS` at import; Gemini model list fetched in background after window appears (avoids blocking on API/network).
 - **Prompt prefix**: Built once per document, reused for all blocks (avoids per-block string concat).
 - **Parallel expansion**: `ThreadPoolExecutor` for concurrent Gemini/Ollama calls (configurable via Parallel / `EXPANDER_MAX_CONCURRENT`).
 - **Streaming throttle**: In parallel mode with many blocks (>8), `partial_result_callback` runs every 2nd block to reduce XML serialization cost.
@@ -35,5 +36,8 @@ Override: `EXPANDER_AGGRESSIVE_LOCAL=0` to disable; `=1` to force on (even on ba
 ## Tuning
 
 - `EXPANDER_MAX_CONCURRENT`: Default 2 (Gemini), 6 (local), 12 (local + high-end GPU). Lower if hitting 429.
-- `GEMINI_TIMEOUT`: Per-request timeout (default 120s).
+- `GEMINI_TIMEOUT`: Per-request timeout (default 120s). Pro models auto-use at least 300s.
+- Pro model timeout: `_get_timeout_for_model` bumps timeout to 300s (or `GEMINI_TIMEOUT_PRO_MIN`) when model contains "pro".
+- Timeout retry: one automatic retry on `TimeoutError` (transient).
+- Batch with Pro: parallel capped at 2 to avoid overload.
 - `OLLAMA_TIMEOUT`: For local backend (default 120s).

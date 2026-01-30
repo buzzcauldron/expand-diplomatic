@@ -5,6 +5,9 @@ from expand_diplomatic.expander import (
     _build_prompt,
     _build_prompt_prefix,
     expand_xml,
+    get_block_ranges,
+    extract_expansion_pairs,
+    extract_text_lines,
 )
 from expand_diplomatic.local_llm import run_local_rules
 
@@ -50,3 +53,28 @@ def test_expand_xml_local() -> None:
     ex = [{"diplomatic": "y^e", "full": "the"}]
     out = expand_xml(xml, ex, backend="local")
     assert "the" in out or "same" in out
+
+
+def test_expand_xml_invalid_raises() -> None:
+    """Invalid/non-XML input raises clear error (lxml recover=True can return None)."""
+    import pytest
+    ex = [{"diplomatic": "a", "full": "b"}]
+    with pytest.raises(ValueError, match="Invalid or empty XML"):
+        expand_xml("-", ex, backend="local")
+    with pytest.raises(ValueError, match="Invalid or empty XML"):
+        expand_xml("{}", ex, backend="local")
+
+
+def test_get_block_ranges_invalid_returns_empty() -> None:
+    assert get_block_ranges("-") == []
+    assert get_block_ranges("{}") == []
+
+
+def test_extract_expansion_pairs_invalid_returns_empty() -> None:
+    assert extract_expansion_pairs("-", "<x>y</x>") == []
+    assert extract_expansion_pairs("<x>a</x>", "{}") == []
+
+
+def test_extract_text_lines_invalid_returns_empty() -> None:
+    assert extract_text_lines("-") == ""
+    assert extract_text_lines("{}") == ""

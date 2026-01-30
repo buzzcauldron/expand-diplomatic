@@ -19,6 +19,7 @@ from dotenv import load_dotenv, set_key
 ROOT_DIR = Path(__file__).resolve().parent
 ENV_PATH = ROOT_DIR / ".env"
 ENV_EXAMPLE = ROOT_DIR / ".env.example"
+PREFS_PATH = Path.home() / ".config" / "expand_diplomatic" / "preferences.json"
 
 
 def _ensure_env() -> None:
@@ -32,16 +33,40 @@ def _ensure_env() -> None:
 
 _ensure_env()
 
-# Lightweight imports only at startup (no run_gemini, lxml); expand_xml lazy-loaded on first Expand
+
+def _load_preferences() -> dict:
+    """Load user preferences from disk. Returns dict; empty on failure."""
+    import json
+    try:
+        if PREFS_PATH.exists():
+            data = json.loads(PREFS_PATH.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+    except Exception:
+        pass
+    return {}
+
+
+def _save_preferences(prefs: dict) -> None:
+    """Save user preferences to disk."""
+    import json
+    try:
+        PREFS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        PREFS_PATH.write_text(json.dumps(prefs, indent=0), encoding="utf-8")
+    except Exception:
+        pass
+
+
+# Lightweight imports at startup (no run_gemini, lxml); expand_xml lazy-loaded on first Expand
+# ideasrule-style: defer heavy work; use fallback for fast startup
 from expand_diplomatic.examples_io import add_learned_pairs, get_learned_path, load_examples, save_examples
-from expand_diplomatic.gemini_models import DEFAULT_MODEL, get_available_models
+from expand_diplomatic.gemini_models import DEFAULT_MODEL, FALLBACK_MODELS
 
 DEFAULT_EXAMPLES = ROOT_DIR / "examples.json"
 BACKENDS = ("gemini", "local")
 MODALITIES = ("full", "conservative", "normalize", "aggressive", "local")
 
-# Load Gemini models (cached, with fallback)
-GEMINI_MODELS = get_available_models()
+# Use fallback models for instant startup; refresh from API in background
+GEMINI_MODELS = FALLBACK_MODELS
 DEFAULT_GEMINI_MODEL = DEFAULT_MODEL
 
 
@@ -195,7 +220,7 @@ def _expand_worker(
         
         app.root.after(0, update_output)
 
-    whole_doc = app.whole_document_var.get() if getattr(app, "whole_document_var", None) else True
+    whole_doc = app.whole_document_var.get() if getattr(app, "whole_document_var", None) else False
     ex_path = None
     if whole_doc and backend == "gemini" and not getattr(app, "_expand_include_learned", True):
         ex_path = getattr(app, "_expand_examples_path", None)
@@ -237,9 +262,18 @@ def _expand_worker(
             return
         if err is not None:
             if isinstance(err, ExpandCancelled):
-                _status(app, "Cancelled.")
-                # Process next in queue even on cancel
-                app.root.after(100, lambda: app._process_next_in_queue())
+                if getattr(app, "_restart_with_block_by_block", False):
+                    app._restart_with_block_by_block = False
+                    _status(app, "Switching to block-by-block…")
+                    app.root.after(50, lambda: _run_expand_internal(
+                        app,
+                        app.last_expand_xml or "",
+                        app.last_expand_api_key,
+                        app.last_expand_backend,
+                    ))
+                else:
+                    _status(app, "Cancelled.")
+                    app.root.after(100, lambda: app._process_next_in_queue())
                 return
             _status(app, "Idle")
             msg = format_api_error(err) if err else "Unknown error"
@@ -281,6 +315,7 @@ def _expand_worker(
 def _start_hang_check(app: "App") -> None:
     """Start periodic hang check during expansion."""
     HANG_THRESHOLD_SEC = 90
+    WHOLE_DOC_HANG_SEC = 330  # Whole-doc: single API call, Pro models timeout at 300s
     CHECK_INTERVAL_MS = 5000  # Check every 5s
 
     def check() -> None:
@@ -288,9 +323,10 @@ def _start_hang_check(app: "App") -> None:
             return
         elapsed_since_progress = time.time() - app.last_progress_time
         total_elapsed = int(time.time() - app.expand_start_time)
-        # Update elapsed time display
+        # Update elapsed time display (keeps whole-doc timer ticking)
         app.time_label_var.set(f"{total_elapsed}s")
-        if elapsed_since_progress > HANG_THRESHOLD_SEC:
+        threshold = WHOLE_DOC_HANG_SEC if getattr(app, "_expand_whole_doc", False) else HANG_THRESHOLD_SEC
+        if elapsed_since_progress > threshold:
             app.status_var.set(f"⚠ Possible hang ({int(elapsed_since_progress)}s no progress)…")
         # Schedule next check
         app.hang_check_id = app.root.after(CHECK_INTERVAL_MS, check)
@@ -536,7 +572,8 @@ def _run_expand_internal(
     app.expand_running = True
     app.cancel_requested = False
     app.expand_run_id = getattr(app, "expand_run_id", 0) + 1
-    whole_doc = app.whole_document_var.get() if getattr(app, "whole_document_var", None) else True
+    whole_doc = app.whole_document_var.get() if getattr(app, "whole_document_var", None) else False
+    app._expand_whole_doc = whole_doc  # Hang check uses longer threshold for whole-doc
     if whole_doc:
         app.progress_bar.configure(mode="indeterminate")
         app.progress_bar.start(10)
@@ -560,11 +597,28 @@ def _run_expand_internal(
     t.start()
 
 
+_APP_NAME = "Expand diplomatic"
+
+
+def _set_app_display_name() -> None:
+    """Set process/window name for Dock, taskbar, hover, right-click. Optional: setproctitle."""
+    try:
+        import setproctitle
+        setproctitle.setproctitle(_APP_NAME)
+    except ImportError:
+        pass
+
+
 class App:
     def __init__(self) -> None:
+        _set_app_display_name()
         self.root = tk.Tk()
         from expand_diplomatic._version import __version__
-        self.root.title(f"Expand diplomatic v{__version__}")
+        self.root.title(f"{_APP_NAME} v{__version__}")
+        try:
+            self.root.wm_iconname(_APP_NAME)  # Icon/taskbar name on hover
+        except Exception:
+            pass
         self.root.minsize(600, 400)
         self.root.geometry("900x550")
         _icon_path = ROOT_DIR / "stretch_armstrong_icon.png"
@@ -615,7 +669,8 @@ class App:
             pass
         self.auto_learn_var = tk.BooleanVar(value=True)
         self.include_learned_var = tk.BooleanVar(value=self._high_end_gpu)
-        self.whole_document_var = tk.BooleanVar(value=True)
+        self.whole_document_var = tk.BooleanVar(value=False)  # Default: block-by-block
+        self._restart_with_block_by_block = False  # Set when user switches to block-by-block during run
         self.autosave_var = tk.BooleanVar(value=True)
         self.autosave_after_id: str | None = None
         self.autosave_idle_ms = 3000
@@ -637,6 +692,10 @@ class App:
         self._build_batch_panel()
         self._build_train()
         self._build_status()
+        self._apply_preferences(_load_preferences())
+        self.root.protocol("WM_DELETE_WINDOW", self._on_quit)
+        # Defer Gemini model fetch to background (ideasrule-style fast startup)
+        self.root.after(200, self._refresh_models_background)
 
     def _build_toolbar(self) -> None:
         bar = tk.Frame(self.root, relief=tk.RAISED, bd=1)
@@ -707,8 +766,9 @@ class App:
         rb_whole.pack(side=tk.LEFT)
         rb_block = tk.Radiobutton(expand_toggle, text="Block-by-block", variable=self.whole_document_var, value=False, **opts)
         rb_block.pack(side=tk.LEFT)
-        _add_tooltip(rb_whole, "Expand entire document in one API call (default)")
-        _add_tooltip(rb_block, "Expand each block separately; shows per-block progress")
+        _add_tooltip(rb_whole, "Expand entire document in one API call")
+        _add_tooltip(rb_block, "Expand each block separately; shows per-block progress (default). Switch during run to cancel and restart.")
+        self.whole_document_var.trace_add("write", self._on_whole_doc_change)
         col += 1
         tk.Checkbutton(r2, text="Learn", variable=self.auto_learn_var, **opts).grid(row=0, column=col, sticky=tk.W, **pad)
         col += 1
@@ -1306,6 +1366,14 @@ class App:
         
         _run_expand_internal(self, xml, api_key, backend, retry=False)
 
+    def _on_whole_doc_change(self, *args: object) -> None:
+        """When user switches to Block-by-block during expansion, cancel and restart in block-by-block mode."""
+        if not getattr(self, "expand_running", False):
+            return
+        if not self.whole_document_var.get():  # Switched to block-by-block
+            self.cancel_requested = True
+            self._restart_with_block_by_block = True
+
     def _on_reexpand(self) -> None:
         """Re-expand from original file; show original on left, new result on right. Uses updated examples+learned."""
         xml = getattr(self, "original_input", "") or ""
@@ -1437,6 +1505,10 @@ class App:
             parallel = max(1, min(8, parallel))
         except ValueError:
             parallel = 2
+        # Pro models: cap parallel to 2 (slower, longer timeouts; reduces overload)
+        model = self.gemini_model_var.get() if backend == "gemini" else ""
+        if backend == "gemini" and "pro" in (model or "").lower():
+            parallel = min(parallel, 2)
 
         # Show file list in confirmation
         file_list_preview = "\n".join(f"  • {f.name}" for f in files[:10])
@@ -1481,7 +1553,8 @@ class App:
         failed = []
         cancelled = [False]
 
-        whole_doc = self.whole_document_var.get() if getattr(self, "whole_document_var", None) else True
+        # Batch defaults to whole-doc (faster for many files)
+        whole_doc = True
         ex_path = examples_path if (whole_doc and backend == "gemini" and not include_learned) else None
 
         def expand_one(f: Path) -> tuple[Path, bool, str]:
@@ -1617,8 +1690,32 @@ class App:
         t = threading.Thread(target=run, daemon=True)
         t.start()
 
+    def _refresh_models_background(self) -> None:
+        """Fetch Gemini models in background; update menu when done. No UI feedback (fast startup)."""
+        api_key = _resolve_api_key(self)
+
+        def run() -> None:
+            from expand_diplomatic.gemini_models import get_available_models
+            models = get_available_models(api_key=api_key, force_refresh=False)
+
+            def done() -> None:
+                global GEMINI_MODELS
+                if models and models != GEMINI_MODELS:
+                    GEMINI_MODELS = models
+                    menu = self._model_menu["menu"]
+                    menu.delete(0, "end")
+                    for m in models:
+                        menu.add_command(label=m, command=lambda v=m: self.gemini_model_var.set(v))
+                    current = self.gemini_model_var.get()
+                    if current not in models:
+                        self.gemini_model_var.set(DEFAULT_GEMINI_MODEL if DEFAULT_GEMINI_MODEL in models else models[0])
+
+            self.root.after(0, done)
+
+        threading.Thread(target=run, daemon=True).start()
+
     def _on_refresh_models(self) -> None:
-        """Refresh Gemini model list from API."""
+        """Refresh Gemini model list from API (manual, with feedback)."""
         api_key = _resolve_api_key(self)
         
         def run() -> None:
@@ -1819,6 +1916,70 @@ class App:
         self.full_var.set("")
         self._refresh_train_list()
         _status(self, f"Added 1 pair → {p.name} ({len(examples)} total)")
+
+    def _collect_preferences(self) -> dict:
+        """Build preferences dict from current UI state."""
+        p = {}
+        try:
+            p["backend"] = self.backend_var.get().strip() or "gemini"
+            p["modality"] = self.modality_var.get().strip() or "full"
+            p["gemini_model"] = self.gemini_model_var.get().strip() or ""
+            p["concurrent"] = self.concurrent_var.get().strip() or "2"
+            p["passes"] = self.passes_var.get().strip() or "1"
+            p["whole_document"] = bool(self.whole_document_var.get())
+            p["auto_learn"] = bool(self.auto_learn_var.get())
+            p["include_learned"] = bool(self.include_learned_var.get())
+            p["autosave"] = bool(self.autosave_var.get())
+            p["examples_path"] = self.examples_var.get().strip() or ""
+            if self.last_dir is not None and self.last_dir.exists():
+                p["last_dir"] = str(self.last_dir)
+        except Exception:
+            pass
+        return p
+
+    def _apply_preferences(self, p: dict) -> None:
+        """Apply loaded preferences to UI. Safe to call with empty dict."""
+        if not p:
+            return
+        try:
+            if p.get("backend") in BACKENDS:
+                self.backend_var.set(p["backend"])
+                self._on_backend_change(p["backend"])
+            if p.get("modality") in MODALITIES:
+                self.modality_var.set(p["modality"])
+            gemini_model = p.get("gemini_model", "").strip()
+            if gemini_model and gemini_model in GEMINI_MODELS:
+                self.gemini_model_var.set(gemini_model)
+            conc = p.get("concurrent", "")
+            if conc and conc.isdigit():
+                self.concurrent_var.set(conc)
+            passes = p.get("passes", "")
+            if passes and passes.isdigit():
+                self.passes_var.set(passes)
+            if "whole_document" in p:
+                self.whole_document_var.set(bool(p["whole_document"]))
+            if "auto_learn" in p:
+                self.auto_learn_var.set(bool(p["auto_learn"]))
+            if "include_learned" in p:
+                self.include_learned_var.set(bool(p["include_learned"]))
+            if "autosave" in p:
+                self.autosave_var.set(bool(p["autosave"]))
+            ex_path = p.get("examples_path", "").strip()
+            if ex_path and Path(ex_path).exists():
+                self.examples_var.set(ex_path)
+                self._refresh_train_list()
+            last_dir = p.get("last_dir", "")
+            if last_dir:
+                pd = Path(last_dir)
+                if pd.is_dir():
+                    self.last_dir = pd
+        except Exception:
+            pass
+
+    def _on_quit(self) -> None:
+        """Save preferences and close."""
+        _save_preferences(self._collect_preferences())
+        self.root.destroy()
 
     def run(self) -> None:
         self.root.mainloop()

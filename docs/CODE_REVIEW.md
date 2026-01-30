@@ -97,6 +97,7 @@ Review date: 2026-01-29 (updated)
 - Indeterminate progress bar for whole-doc; determinate for block-by-block
 - `_expand_examples_path` / `_expand_include_learned` set before thread start; worker reads them for examples file upload decision
 - **Diff** button: unified diff of input vs output via `difflib` (cross-platform, no external `diff`); shows what expansion changed
+- **Switch to block-by-block during run:** Trace on `whole_document_var`; when user selects Block-by-block mid-expansion, cancels and restarts in block-by-block mode
 
 ### ✓ Fixed
 1. **`whole_document_var` guard** — Defensive fallback remains; var is always created.
