@@ -109,7 +109,7 @@ python gui.py
 
 - **No API key** – Paste your key when prompted, or add it to `.env`.
 - **Rate limit (429)** – Lower **Parallel** to 1, wait a minute, then try again.
-- **Timeout / hangs** – Try the **Local** backend, or add `GEMINI_TIMEOUT=60` to `.env`.
+- **Timeout / hangs** – Try the **Local** backend, or adjust `GEMINI_TIMEOUT` in `.env` (increase for large docs with Whole doc mode, e.g. 180).
 - **Want to avoid the API** – Switch **Backend** to **Local**; the app will use rules and (if installed) Ollama.
 
 ### Extra features
