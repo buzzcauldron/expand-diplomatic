@@ -16,8 +16,8 @@ from typing import Optional
 _CACHE_FILE = Path.home() / ".cache" / "expand_diplomatic" / "gemini_models.txt"
 _CACHE_TTL_SECONDS = 86400  # 24 hours
 
-# Fallback models (ordered by speed: fastest to slowest)
-_FALLBACK_MODELS = (
+# Fallback models (ordered by speed: fastest to slowest). Used for fast startup before API fetch.
+FALLBACK_MODELS = (
     "gemini-2.5-flash-lite",
     "gemini-3-flash-preview",
     "gemini-2.0-flash",
@@ -146,7 +146,7 @@ def get_available_models(api_key: Optional[str] = None, force_refresh: bool = Fa
         return tuple(models)
     
     # Fallback to hardcoded list
-    return _FALLBACK_MODELS
+    return FALLBACK_MODELS
 
 
 def clear_cache() -> None:

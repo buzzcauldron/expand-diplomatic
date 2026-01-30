@@ -120,6 +120,7 @@ python gui.py
 - **Double-click companion line** – Double-click a block to select it in both panels and show the matching line in the companion XML. The program opens the companion file in the other panel if needed (e.g. `filename_expanded.xml` when you double-click in input, or `filename.xml` when you double-click in output), then scrolls to the same block index so you always see input and output from the same pair of files.
 - **Image panel** – Click the 🖼▶ strip on the right to expand and upload an image for reference.
 - **Passes** – Run expansion more than once in a row to refine the text.
+- **Persistent preferences** – Your selections (Backend, Model, Modality, Whole doc, etc.) and last-opened directory are saved when you quit and restored when you reopen.
 
 ---
 

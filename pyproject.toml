@@ -22,6 +22,10 @@ dev = [
     "pytest>=7.0.0",
     "wheel",
 ]
+# Optional: cleaner Dock/taskbar name (pip install expand-diplomatic[dock])
+dock = [
+    "setproctitle>=1.3.0",
+]
 
 [project.scripts]
 expand-diplomatic = "expand_diplomatic.__main__:main"

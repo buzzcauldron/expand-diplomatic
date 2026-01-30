@@ -45,6 +45,11 @@ load_dotenv(Path(__file__).resolve().parent / ".env")
 
 DEFAULT_TIMEOUT = 120
 DEFAULT_RETRY_ATTEMPTS = 2
+# Pro models need longer; min timeout for pro (override with GEMINI_TIMEOUT_PRO_MIN env)
+_PRO_MIN = os.environ.get("GEMINI_TIMEOUT_PRO_MIN", "")
+PRO_MODEL_MIN_TIMEOUT = int(_PRO_MIN) if _PRO_MIN.isdigit() else 300
+# Retry once on timeout (transient)
+TIMEOUT_EXTRA_RETRIES = 1
 
 
 def _get_timeout_seconds() -> float:
@@ -79,6 +84,13 @@ def _http_options(timeout_sec: float, retry_attempts: int) -> types.HttpOptions:
             initial_delay=1.0,
         )
     return types.HttpOptions(**opts)
+
+
+def _get_timeout_for_model(model: str | None, base_sec: float) -> float:
+    """Use higher timeout for pro models (slower, larger context)."""
+    if not model or "pro" not in model.lower():
+        return base_sec
+    return max(base_sec, PRO_MODEL_MIN_TIMEOUT)
 
 
 def _get_api_key(api_key: Optional[str]) -> str:
@@ -192,7 +204,8 @@ def run_gemini(
     if model is None:
         model = _DEFAULT_GEMINI
     key = _get_api_key(api_key)
-    t = timeout if timeout is not None else _get_timeout_seconds()
+    base_t = timeout if timeout is not None else _get_timeout_seconds()
+    t = _get_timeout_for_model(model, base_t)
     retries = _get_retry_attempts()
     # Thread timeout slightly above HTTP timeout so HTTP timeout fires first when respected
     thread_timeout = t + 15.0
@@ -222,7 +235,9 @@ def run_gemini(
                 ) from None
 
     last_err: Optional[Exception] = None
-    for attempt in range(1 + _429_EXTRA_RETRIES):
+    max_attempts = 1 + _429_EXTRA_RETRIES + TIMEOUT_EXTRA_RETRIES
+    timeout_retries_left = TIMEOUT_EXTRA_RETRIES
+    for attempt in range(max_attempts):
         try:
             return do_call()
         except Exception as e:
@@ -232,6 +247,11 @@ def run_gemini(
                 if code == 429 and attempt < _429_EXTRA_RETRIES:
                     time.sleep(_429_BACKOFF_SEC)
                     continue
+            # Retry once on timeout (often transient)
+            if isinstance(e, TimeoutError) and timeout_retries_left > 0:
+                timeout_retries_left -= 1
+                time.sleep(2)  # Brief pause before retry
+                continue
             raise
     raise last_err or RuntimeError("Unexpected")
 
