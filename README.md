@@ -85,7 +85,7 @@ python gui.py
 | Button | What it does |
 |--------|--------------|
 | **Open…** | Load an XML file |
-| **Expand** | Expand abbreviations (online with Gemini or locally). If an expansion is already running, becomes **Queued** to add the current file to the queue. |
+| **Expand** | Expand abbreviations (online with Gemini or locally). During expansion, changes to **Queued (N)** showing queue count. Click again to toggle the current file in/out of queue. |
 | **Save…** | Save the expanded result |
 | **◀** / **▶** | Previous/next XML file in the same folder |
 | **Re-expand** | Re-expand from the original file; keeps original on left, new result on right. Uses updated examples and learned pairs. |
@@ -93,7 +93,7 @@ python gui.py
 
 **Keyboard shortcuts:** Ctrl+O (Open), Ctrl+S (Save), Ctrl+E (Expand), Ctrl+← / Ctrl+→ (prev/next file in folder)
 
-**Expansion Queue:** When an expansion is running and you click **Expand** (which changes to **Queued**) or navigate to a new file, the expansion is added to a queue. The tool will automatically process queued expansions one after another. You can see "Queue: N" in the status bar and click **Clear Q** to empty the queue.
+**Expansion Queue:** When an expansion is running, the **Expand** button shows **Queued (N)** with the number of queued files. Click it to add the current file to the queue, or click again to remove it. The tool automatically processes queued expansions one after another. You can see "Queue: N" in the status bar and click **Clear Q** to empty the entire queue.
 
 ### Settings
 

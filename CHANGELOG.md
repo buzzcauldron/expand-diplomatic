@@ -17,9 +17,10 @@ The project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 - Windows MSI installer build script (`scripts/build-windows-msi.sh`) using cx_Freeze
 - Training examples expanded: 44 new Latin abbreviation pairs (62 total, was 18)
 - **Expansion queue system**: Click Expand/Re-expand or navigate files while expansion is running to queue jobs
-  - Expand button changes to "Queued" during expansion
+  - Expand button shows "Queued (N)" with queue count during expansion
+  - Click Expand button again to toggle current file in/out of queue (no dialog)
   - Status bar shows "Queue: N" with queued count
-  - "Clear Q" button to empty queue
+  - "Clear Q" button to empty entire queue
   - Automatic sequential processing after current expansion completes
 - **Smart file pairing on double-click**: Auto-loads correct paired file if input/output are mismatched
   - Double-click in input panel loads `*_expanded.xml` if available
