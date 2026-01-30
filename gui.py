@@ -1024,7 +1024,8 @@ class App:
             other.see(start_idx)
 
     def _on_panel_double_click(self, event: tk.Event) -> None:
-        """On double-click, snap selection to the entire block at clicked position in both panels."""
+        """On double-click, snap selection to the entire block at clicked position in both panels.
+        If input/output files are mismatched, load the correct paired file."""
         widget = event.widget
         try:
             idx = widget.index(f"@{event.x},{event.y}")
@@ -1045,8 +1046,20 @@ class App:
                 break
         if block_idx is None:
             return
+        
+        # Check if files are mismatched and load paired file if needed
+        is_input_panel = (widget is self.input_txt)
+        if self._check_and_load_paired_file(is_input_panel):
+            # Files were mismatched and paired file loaded, re-get content and ranges
+            content = widget.get("1.0", tk.END)
+            ranges = self._get_block_ranges_cached(content)
+            if block_idx >= len(ranges):
+                return  # Block no longer exists after reload
+            start, end = ranges[block_idx]
+        else:
+            start, end = ranges[block_idx]
+        
         # Select full block in clicked widget
-        start, end = ranges[block_idx]
         start_idx = widget.index(f"1.0 + {start} chars")
         end_idx = widget.index(f"1.0 + {end} chars")
         widget.tag_remove("sel", "1.0", tk.END)
@@ -1073,6 +1086,79 @@ class App:
                 widget.see(start_idx)
                 other.see(o_start_idx)
         return "break"  # Prevent default word selection
+    
+    def _check_and_load_paired_file(self, clicked_input_panel: bool) -> bool:
+        """Check if input/output files are mismatched and load the correct paired file.
+        Returns True if a file was loaded, False otherwise."""
+        if self.last_input_path is None:
+            return False
+        
+        # Determine expected paired file
+        if clicked_input_panel:
+            # Double-clicked in input panel - check if output should be loaded
+            expected_output = self.last_input_path.parent / f"{self.last_input_path.stem}_expanded.xml"
+            if not expected_output.exists():
+                return False
+            
+            # Check if output panel content matches the expected file
+            current_output = self.output_txt.get("1.0", tk.END).strip()
+            if not current_output:
+                # Output is empty, load the paired file
+                try:
+                    output_text = expected_output.read_text(encoding="utf-8")
+                    self.output_txt.delete("1.0", tk.END)
+                    self.output_txt.insert("1.0", output_text)
+                    self.output_txt.see("1.0")
+                    _status(self, f"Loaded paired: {expected_output.name}")
+                    return True
+                except Exception:
+                    return False
+            
+            # Check if content is from a different file by comparing first 200 chars
+            try:
+                expected_text = expected_output.read_text(encoding="utf-8")
+                if expected_text[:200].strip() != current_output[:200].strip():
+                    # Content mismatch, load the correct file
+                    self.output_txt.delete("1.0", tk.END)
+                    self.output_txt.insert("1.0", expected_text)
+                    self.output_txt.see("1.0")
+                    _status(self, f"Loaded paired: {expected_output.name}")
+                    return True
+            except Exception:
+                return False
+        else:
+            # Double-clicked in output panel - check if we can find the corresponding input
+            output_text = self.output_txt.get("1.0", tk.END).strip()
+            if not output_text or not self.last_input_path:
+                return False
+            
+            # Check if the output is from an _expanded.xml file
+            # Try to find the corresponding input file
+            if "_expanded" in str(self.last_input_path):
+                # Current input is an expanded file, find the base file
+                base_name = self.last_input_path.stem.replace("_expanded", "")
+                expected_input = self.last_input_path.parent / f"{base_name}.xml"
+            else:
+                # Check if there's a mismatch by seeing if output looks like it's from a different source
+                expected_input = self.last_input_path
+            
+            if expected_input.exists() and expected_input != self.last_input_path:
+                try:
+                    input_text = expected_input.read_text(encoding="utf-8")
+                    current_input = self.input_txt.get("1.0", tk.END).strip()
+                    if input_text[:200].strip() != current_input[:200].strip():
+                        # Load the correct input file
+                        self.input_txt.delete("1.0", tk.END)
+                        self.input_txt.insert("1.0", input_text)
+                        self.input_txt.see("1.0")
+                        self.last_input_path = expected_input
+                        self.original_input = input_text
+                        _status(self, f"Loaded paired: {expected_input.name}")
+                        return True
+                except Exception:
+                    return False
+        
+        return False
 
     def _file_dialog_dir(self) -> Path:
         """Directory for file dialogs: last path from any file selection, else examples dir, else project root."""

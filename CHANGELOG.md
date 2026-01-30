@@ -21,6 +21,10 @@ The project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
   - Status bar shows "Queue: N" with queued count
   - "Clear Q" button to empty queue
   - Automatic sequential processing after current expansion completes
+- **Smart file pairing on double-click**: Auto-loads correct paired file if input/output are mismatched
+  - Double-click in input panel loads `*_expanded.xml` if available
+  - Detects content mismatch (different file loaded) and auto-corrects
+  - Status notification when paired file is loaded
 
 ### Changed
 
