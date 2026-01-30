@@ -114,7 +114,8 @@ python gui.py
 ### Extra features
 
 - **Input→TXT** / **Output→TXT** – Export text blocks to plain `.txt` files.
-- **Click to sync** – Click a block in input or output to jump to the matching block in the other panel. Double-click to select the full block.
+- **Click to sync** – Click a block in input or output to jump to the matching block in the other panel.
+- **Double-click smart pairing** – Double-click a block to select it in both panels. If input/output files are mismatched (e.g., you loaded a different file after expanding), double-clicking automatically loads the correct paired file (`filename.xml` ↔ `filename_expanded.xml`) to bring them into alignment.
 - **Image panel** – Click the 🖼▶ strip on the right to expand and upload an image for reference.
 - **Passes** – Run expansion more than once in a row to refine the text.
 
