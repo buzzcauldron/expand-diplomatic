@@ -22,10 +22,10 @@ The project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
   - Status bar shows "Queue: N" with queued count
   - "Clear Q" button to empty entire queue
   - Automatic sequential processing after current expansion completes
-- **Smart file pairing on double-click**: Auto-loads correct paired file if input/output are mismatched
-  - Double-click in input panel loads `*_expanded.xml` if available
-  - Detects content mismatch (different file loaded) and auto-corrects
-  - Status notification when paired file is loaded
+- **Double-click opens companion XML**: Double-clicking a line loads the companion file in the other panel and shows the matching line
+  - Double-click in input → opens `filename_expanded.xml` in output (if it exists) and syncs to same block
+  - Double-click in output → opens `filename.xml` in input (if it exists) and syncs to same block
+  - Tracks `last_output_path` so output panel’s file is known; companion is always the correct paired file, not just the XML currently open
 
 ### Changed
 
