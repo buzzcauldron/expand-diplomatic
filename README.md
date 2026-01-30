@@ -98,7 +98,7 @@ python gui.py
 ### Settings
 
 - **Backend** – Use **Gemini** (online, needs API key) or **Local** (no key, uses rules or Ollama).
-- **Model** – Which Gemini model to use (hidden when Backend is Local). Default: gemini-3-flash-preview. Click **⟳** to refresh the available models from the API.
+- **Model** – Which Gemini model to use (hidden when Backend is Local). Default: gemini-2.5-flash (best value). Speed shown with tick marks (······ = fastest). Click **⟳** to refresh.
 - **Whole doc** – When checked (default), expand the entire document in one API call. Uncheck for block-by-block expansion (e.g. for very long documents or progress display).
 - **Modality** – How much to expand manuscript transcriptions: conservative, normalize, full, aggressive, or **local** (tuned for non-Gemini models like Ollama; not the default).
 - **Simul.** – How many blocks to process at once. Lower this (e.g. 1) if you see rate limit errors.
@@ -319,7 +319,7 @@ Build native packages for different platforms:
 Useful flags when running from the command line:
 
 - `--examples PATH` — Use a different examples file
-- `--model ID` — Change Gemini model (default: gemini-3-flash-preview)
+- `--model ID` — Change Gemini model (default: gemini-2.5-flash)
 - `--block-by-block` — Expand each block separately instead of whole document in one call
 - `--modality {full,conservative,normalize,aggressive,local}` — Manuscript expansion mode (`local` is tuned for non-Gemini models)
 - `--passes N` — Run expansion multiple times (1–5)

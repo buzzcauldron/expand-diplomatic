@@ -59,7 +59,7 @@ def _save_preferences(prefs: dict) -> None:
 # Lightweight imports at startup (no run_gemini, lxml); expand_xml lazy-loaded on first Expand
 # ideasrule-style: defer heavy work; use fallback for fast startup
 from expand_diplomatic.examples_io import add_learned_pairs, get_learned_path, load_examples, save_examples
-from expand_diplomatic.gemini_models import DEFAULT_MODEL, FALLBACK_MODELS
+from expand_diplomatic.gemini_models import DEFAULT_MODEL, FALLBACK_MODELS, format_model_with_speed
 
 DEFAULT_EXAMPLES = ROOT_DIR / "examples.json"
 BACKENDS = ("gemini", "local")
@@ -99,6 +99,14 @@ def _add_tooltip(widget: tk.Widget, text: str, delay_ms: int = 500) -> None:
 
     widget.bind("<Enter>", show)
     widget.bind("<Leave>", hide)
+
+
+def _apply_model_menu_labels(option_menu: tk.OptionMenu, var: tk.StringVar, models: tuple[str, ...]) -> None:
+    """Rebuild option menu with speed tick marks (more · = faster)."""
+    menu = option_menu["menu"]
+    menu.delete(0, "end")
+    for m in models:
+        menu.add_command(label=format_model_with_speed(m), command=lambda v=m: var.set(v))
 
 
 def _status(app: "App", msg: str) -> None:
@@ -738,6 +746,9 @@ class App:
         col += 1
         self._model_menu = tk.OptionMenu(r2, self.gemini_model_var, *GEMINI_MODELS)
         self._model_menu.grid(row=0, column=col, sticky=tk.W, **pad)
+        # Rebuild with speed tick marks (more · = faster)
+        _apply_model_menu_labels(self._model_menu, self.gemini_model_var, GEMINI_MODELS)
+        _add_tooltip(self._model_menu, "Gemini model. More · = faster. Default = best value.")
         col += 1
         self._model_refresh_btn = tk.Button(r2, text="⟳", width=2, command=self._on_refresh_models, **opts)
         self._model_refresh_btn.grid(row=0, column=col, **pad)
@@ -1702,10 +1713,7 @@ class App:
                 global GEMINI_MODELS
                 if models and models != GEMINI_MODELS:
                     GEMINI_MODELS = models
-                    menu = self._model_menu["menu"]
-                    menu.delete(0, "end")
-                    for m in models:
-                        menu.add_command(label=m, command=lambda v=m: self.gemini_model_var.set(v))
+                    _apply_model_menu_labels(self._model_menu, self.gemini_model_var, models)
                     current = self.gemini_model_var.get()
                     if current not in models:
                         self.gemini_model_var.set(DEFAULT_GEMINI_MODEL if DEFAULT_GEMINI_MODEL in models else models[0])
@@ -1725,11 +1733,7 @@ class App:
             def done() -> None:
                 global GEMINI_MODELS
                 GEMINI_MODELS = models
-                # Rebuild model dropdown menu
-                menu = self._model_menu["menu"]
-                menu.delete(0, "end")
-                for m in models:
-                    menu.add_command(label=m, command=lambda v=m: self.gemini_model_var.set(v))
+                _apply_model_menu_labels(self._model_menu, self.gemini_model_var, models)
                 # Ensure current selection is valid
                 current = self.gemini_model_var.get()
                 if current not in models:
