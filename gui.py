@@ -984,26 +984,29 @@ class App:
         cache[content] = ranges
         return ranges
 
-    def _on_panel_click(self, event: tk.Event) -> None:
-        """On click in input or output, select the parallel block in the other panel and align vertically."""
-        widget = event.widget
+    def _get_block_at_click(self, widget: tk.Text, event: tk.Event) -> tuple[int | None, list[tuple[int, int]], str]:
+        """Return (block_idx, ranges, content) for the block at click position, or (None, [], content)."""
         try:
             idx = widget.index(f"@{event.x},{event.y}")
         except Exception:
-            return
+            return (None, [], "")
         if not idx:
-            return
+            return (None, [], "")
         content = widget.get("1.0", tk.END)
         try:
             char_offset = widget.count("1.0", idx, "chars")[0]
         except Exception:
-            return
+            return (None, [], content)
         ranges = self._get_block_ranges_cached(content)
-        block_idx = None
         for i, (start, end) in enumerate(ranges):
             if start <= char_offset < end:
-                block_idx = i
-                break
+                return (i, ranges, content)
+        return (None, ranges, content)
+
+    def _on_panel_click(self, event: tk.Event) -> None:
+        """On click in input or output, select the parallel block in the other panel and align vertically."""
+        widget = event.widget
+        block_idx, _, _ = self._get_block_at_click(widget, event)
         if block_idx is None:
             return
         other = self.output_txt if widget is self.input_txt else self.input_txt
@@ -1030,37 +1033,14 @@ class App:
         """On double-click, snap selection to the entire block at clicked position in both panels.
         If input/output files are mismatched, load the correct paired file."""
         widget = event.widget
-        try:
-            idx = widget.index(f"@{event.x},{event.y}")
-        except Exception:
-            return
-        if not idx:
-            return
-        content = widget.get("1.0", tk.END)
-        try:
-            char_offset = widget.count("1.0", idx, "chars")[0]
-        except Exception:
-            return
-        ranges = self._get_block_ranges_cached(content)
-        block_idx = None
-        for i, (start, end) in enumerate(ranges):
-            if start <= char_offset < end:
-                block_idx = i
-                break
+        block_idx, ranges, content = self._get_block_at_click(widget, event)
         if block_idx is None:
             return
         
         # Check if files are mismatched and load paired file if needed
         is_input_panel = (widget is self.input_txt)
-        if self._check_and_load_paired_file(is_input_panel):
-            # Files were mismatched and paired file loaded, re-get content and ranges
-            content = widget.get("1.0", tk.END)
-            ranges = self._get_block_ranges_cached(content)
-            if block_idx >= len(ranges):
-                return  # Block no longer exists after reload
-            start, end = ranges[block_idx]
-        else:
-            start, end = ranges[block_idx]
+        self._check_and_load_paired_file(is_input_panel)
+        start, end = ranges[block_idx]
         
         # Select full block in clicked widget
         start_idx = widget.index(f"1.0 + {start} chars")

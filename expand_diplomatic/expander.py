@@ -52,6 +52,11 @@ def _escape_xml_text(s: str) -> str:
     return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
 
 
+def _local_name(el: etree._Element) -> str:
+    """Local tag name for element (handles namespaces)."""
+    return etree.QName(el).localname if el.tag is not None else ""
+
+
 def get_block_ranges(xml_source: str, block_tags: set[str] | None = None) -> list[tuple[int, int]]:
     """
     Return (start, end) character ranges for each block element in the XML string.
@@ -65,11 +70,8 @@ def get_block_ranges(xml_source: str, block_tags: set[str] | None = None) -> lis
     ranges: list[tuple[int, int]] = []
     search_start = 0
 
-    def local_name(el: etree._Element) -> str:
-        return etree.QName(el).localname if el.tag is not None else ""
-
     for el in root.iter():
-        if local_name(el) not in tags:
+        if _local_name(el) not in tags:
             continue
         if _has_descendant_block(el, tags):
             continue
@@ -116,12 +118,9 @@ def extract_expansion_pairs(
         except etree.XMLSyntaxError:
             return []
 
-        def local_name(el: etree._Element) -> str:
-            return etree.QName(el).localname if el.tag is not None else ""
-
         blocks = []
         for el in root.iter():
-            if local_name(el) not in tags:
+            if _local_name(el) not in tags:
                 continue
             if _has_descendant_block(el, tags):
                 continue
@@ -151,11 +150,8 @@ def extract_text_lines(xml_source: str, block_tags: set[str] | None = None) -> s
         return ""
     lines: list[str] = []
 
-    def local_name(el: etree._Element) -> str:
-        return etree.QName(el).localname if el.tag is not None else ""
-
     for el in root.iter():
-        if local_name(el) not in tags:
+        if _local_name(el) not in tags:
             continue
         if _has_descendant_block(el, tags):
             continue
@@ -199,22 +195,8 @@ MODALITY_SYSTEM: dict[str, str] = {
 }
 
 
-def _build_prompt_prefix(examples: list[dict[str, str]], modality: str = "full") -> str:
-    """Build system + examples once; append block text per call. For local backend."""
-    system = MODALITY_SYSTEM.get(modality) or MODALITY_SYSTEM["full"]
-    parts = [system, ""]
-    for ex in examples:
-        parts.append("Diplomatic:")
-        parts.append(ex["diplomatic"])
-        parts.append("Full:")
-        parts.append(ex["full"])
-        parts.append("")
-    parts.append("Diplomatic:")
-    return "\n".join(parts)
-
-
-def _build_prompt_prefix_examples_only(examples: list[dict[str, str]]) -> str:
-    """Build examples section only (no modality). For Gemini with system_instruction."""
+def _format_examples_for_prompt(examples: list[dict[str, str]]) -> str:
+    """Format examples as 'Diplomatic: ... Full: ...' lines, ending with 'Diplomatic:'."""
     parts = []
     for ex in examples:
         parts.append("Diplomatic:")
@@ -224,6 +206,17 @@ def _build_prompt_prefix_examples_only(examples: list[dict[str, str]]) -> str:
         parts.append("")
     parts.append("Diplomatic:")
     return "\n".join(parts)
+
+
+def _build_prompt_prefix(examples: list[dict[str, str]], modality: str = "full") -> str:
+    """Build system + examples once; append block text per call. For local backend."""
+    system = MODALITY_SYSTEM.get(modality) or MODALITY_SYSTEM["full"]
+    return system + "\n\n" + _format_examples_for_prompt(examples)
+
+
+def _build_prompt_prefix_examples_only(examples: list[dict[str, str]]) -> str:
+    """Build examples section only (no modality). For Gemini with system_instruction."""
+    return _format_examples_for_prompt(examples)
 
 
 def _build_prompt(examples: list[dict[str, str]], text: str, modality: str = "full") -> str:
@@ -242,13 +235,10 @@ def _set_inner_text(el: etree._Element, text: str) -> None:
 
 
 def _has_descendant_block(el: etree._Element, tags: set[str]) -> bool:
-    def local(e: etree._Element) -> str:
-        return etree.QName(e).localname if e.tag is not None else ""
-
     for child in el.iter():
         if child is el:
             continue
-        if local(child) in tags:
+        if _local_name(child) in tags:
             return True
     return False
 
@@ -387,12 +377,9 @@ def _expand_once(
     tags = block_tags or TEXT_BLOCK_TAGS
     root = etree.fromstring(xml_source.encode("utf-8"), etree.XMLParser(recover=True, remove_blank_text=False))
 
-    def local_name(el: etree._Element) -> str:
-        return etree.QName(el).localname if el.tag is not None else ""
-
     blocks: list[tuple[etree._Element, str]] = []
     for el in root.iter():
-        if local_name(el) not in tags:
+        if _local_name(el) not in tags:
             continue
         if _has_descendant_block(el, tags):
             continue
