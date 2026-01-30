@@ -8,6 +8,7 @@
 - **Examples I/O**: Shared `_parse_pairs` helper; lean JSON load/save.
 - **Local rules pre-sort**: Sorted pairs computed once per document when backend=local; passed to each block (avoids O(n log n) sort per block).
 - **Block-ranges cache**: GUI caches `get_block_ranges` per panel content to avoid re-parsing on repeated clicks/syncs.
+- **Shared helpers**: `_local_name` (expander), `_format_examples_for_prompt` (expander), `_get_block_at_click` (GUI) — reduce duplication.
 
 ## Bottlenecks (expected)
 
