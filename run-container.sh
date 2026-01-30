@@ -53,16 +53,19 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -n "$DO_BUILD" ]]; then
-  docker build -t "$IMAGE_NAME" "$SCRIPT_DIR"
-fi
-
-if ! docker image inspect "$IMAGE_NAME" &>/dev/null; then
-  docker build -t "$IMAGE_NAME" "$SCRIPT_DIR"
+if [[ -n "$DO_BUILD" ]] || ! docker image inspect "$IMAGE_NAME" &>/dev/null; then
+  docker build -t "$IMAGE_NAME" -f "$SCRIPT_DIR/Dockerfile" "$SCRIPT_DIR"
 fi
 
 run_opts=(--rm -v "$WORKSPACE:/workspace" -w /workspace)
 [[ -n "$PLATFORM" ]] && run_opts+=(--platform "$PLATFORM")
-run_opts+=(-e GEMINI_API_KEY -e GOOGLE_API_KEY -e GEMINI_MODEL -e OLLAMA_MODEL -e OLLAMA_UPDATE_MODEL "$IMAGE_NAME")
+# Pass API keys: .env file (when in workspace) or host env
+if [[ -f "$WORKSPACE/.env" ]]; then
+  run_opts+=(--env-file "$WORKSPACE/.env")
+fi
+for ev in GEMINI_API_KEY GOOGLE_API_KEY GEMINI_MODEL OLLAMA_MODEL OLLAMA_UPDATE_MODEL; do
+  [[ -n "${!ev:-}" ]] && run_opts+=(-e "$ev")
+done
+run_opts+=("$IMAGE_NAME")
 
 docker run "${run_opts[@]}" "$@"

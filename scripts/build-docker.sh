@@ -53,9 +53,9 @@ use_builder() {
   return 1
 }
 
-if ! use_builder "expand-diplomatic-multiarche" 2>/dev/null; then
-  docker buildx create --name "expand-diplomatic-multiarche" --use --driver docker-container 2>/dev/null || true
-  use_builder "expand-diplomatic-multiarche" 2>/dev/null || true
+if ! use_builder "expand-diplomatic-multiarch" 2>/dev/null; then
+  docker buildx create --name "expand-diplomatic-multiarch" --use --driver docker-container 2>/dev/null || true
+  use_builder "expand-diplomatic-multiarch" 2>/dev/null || true
 fi
 
 opts=(--platform "$PLATFORMS" -t "$IMAGE_NAME:latest" -f Dockerfile "$PROJECT_ROOT")

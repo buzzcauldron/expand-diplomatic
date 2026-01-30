@@ -19,11 +19,6 @@ if [[ -z "${OUTPUT:-}" ]]; then
   OUTPUT="$(dirname "$INPUT")/$(basename "$INPUT" .xml)_expanded.xml"
 fi
 
-if [[ -z "${GEMINI_API_KEY:-}" && -z "${GOOGLE_API_KEY:-}" ]]; then
-  echo "Error: set GEMINI_API_KEY or GOOGLE_API_KEY (or add to .env in project root)" >&2
-  exit 1
-fi
-
 PYTHON="${ROOT}/.venv/bin/python"
 [[ -x "$PYTHON" ]] || PYTHON="python"
 

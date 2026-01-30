@@ -12,6 +12,9 @@ __pycache__/
 # Output / expanded (optional)
 expanded/
 
+# Auto-learned from Gemini (local, regeneratable)
+learned_examples.json
+
 # Build artifacts
 dist/
 build/

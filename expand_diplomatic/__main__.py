@@ -50,6 +50,8 @@ def _run_one(
     input_file_path: Path | None = None,
     use_files_api: bool = False,
     dry_run: bool = False,
+    max_concurrent: int | None = None,
+    passes: int = 1,
 ) -> None:
     from .expander import expand_xml
 
@@ -63,6 +65,8 @@ def _run_one(
         dry_run=dry_run,
         backend=backend,
         modality=modality,
+        max_concurrent=max_concurrent,
+        passes=passes,
     )
     if out_path is not None:
         out_path.write_text(result, encoding="utf-8")
@@ -75,7 +79,11 @@ def _run_train(args: argparse.Namespace) -> None:
     from .examples_io import load_examples, save_examples
 
     examples_path = args.examples
-    existing = load_examples(examples_path)
+    try:
+        existing = load_examples(examples_path)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
 
     if args.list:
         print(f"Examples in {examples_path} ({len(existing)} pairs):", file=sys.stderr)
@@ -150,13 +158,24 @@ def _run_expand(args: argparse.Namespace) -> None:
     model = args.model if backend == "gemini" else getattr(args, "local_model", "llama3.2")
     modality = getattr(args, "modality", "full") or "full"
 
-    examples = load_examples(args.examples)
+    try:
+        examples = load_examples(args.examples)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
     if not examples and not dry_run:
         print(
             "Warning: no examples loaded. Add pairs via `train` or edit "
             f"{args.examples}",
             file=sys.stderr,
         )
+
+    mc = getattr(args, "max_concurrent", None)
+    if mc is not None and (mc < 1 or mc > 16):
+        mc = None
+    passes = getattr(args, "passes", 1) or 1
+    passes = max(1, min(5, passes))
 
     def run(text: str, out: Path | None, *, fpath: Path | None = None, files_api: bool = False) -> None:
         _run_one(
@@ -170,6 +189,8 @@ def _run_expand(args: argparse.Namespace) -> None:
             input_file_path=fpath,
             use_files_api=files_api,
             dry_run=dry_run,
+            max_concurrent=mc,
+            passes=passes,
         )
 
     if args.text is not None:
@@ -208,6 +229,19 @@ def _run_expand(args: argparse.Namespace) -> None:
         run(xml, out_path, fpath=f, files_api=args.files_api)
 
 
+def _run_test_gemini(args: argparse.Namespace) -> None:
+    from run_gemini import test_gemini_connection
+
+    api_key = getattr(args, "api_key", None) or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+    timeout = float(getattr(args, "timeout", 15) or 15)
+    ok, msg = test_gemini_connection(api_key=api_key or None, timeout=timeout)
+    print(msg, file=sys.stderr)
+    if ok:
+        print("OK", file=sys.stderr)
+        return
+    sys.exit(1)
+
+
 def main() -> None:
     argv = sys.argv[1:]
     if argv and argv[0] == "train":
@@ -228,6 +262,14 @@ def main() -> None:
         _run_train(args)
         return
 
+    if argv and argv[0] == "test-gemini":
+        ap = argparse.ArgumentParser(description="Test Gemini API connection. Print helpful error on failure.")
+        ap.add_argument("--api-key", type=str, default=None, help="Gemini API key (else env / .env)")
+        ap.add_argument("--timeout", type=float, default=15, help="Timeout seconds (default 15)")
+        args = ap.parse_args(argv[1:])
+        _run_test_gemini(args)
+        return
+
     expand_argv = argv[1:] if argv and argv[0] == "expand" else argv
     ap = argparse.ArgumentParser(
         description="Expand diplomatic transcriptions in XML (TEI) via Gemini or local Ollama.",
@@ -245,8 +287,8 @@ def main() -> None:
     ap.add_argument(
         "--model",
         type=str,
-        default=_env("GEMINI_MODEL", "gemini-2.5-pro"),
-        help="Gemini model (default: GEMINI_MODEL or gemini-2.5-pro)",
+        default=_env("GEMINI_MODEL", "gemini-2.5-flash"),
+        help="Gemini model (default: GEMINI_MODEL or gemini-2.5-flash)",
     )
     ap.add_argument(
         "--backend",
@@ -278,6 +320,20 @@ def main() -> None:
         "--prompt-key",
         action="store_true",
         help="Prompt for API key on stdin when missing (interactive)",
+    )
+    ap.add_argument(
+        "--max-concurrent",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Max parallel blocks (default: 4 gemini, 6 local; env EXPANDER_MAX_CONCURRENT)",
+    )
+    ap.add_argument(
+        "--passes",
+        type=int,
+        default=1,
+        metavar="N",
+        help="Recursive correction passes (1-5, default 1)",
     )
     ap.add_argument("--out", type=Path, help="Output path (single file or --text)")
     ap.add_argument("--out-dir", type=Path, help="Output directory for batch")
