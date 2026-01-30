@@ -476,8 +476,8 @@ def _run_expand_internal(
     except (ValueError, AttributeError):
         passes = 1
     _status(app, "Expanding…")
-    # Change Expand button to show "Queued" while running
-    app.expand_btn.config(text="Queued")
+    # Update Expand button text to show queue status
+    app._update_expand_button_text()
     app.last_expand_xml = xml
     app.last_expand_api_key = api_key
     app.last_expand_backend = backend
@@ -1261,10 +1261,19 @@ class App:
             _show_api_error_dialog(self, "No API key set.", xml, is_retry=False)
             return
         
-        # If expansion is running, add to queue
+        # If expansion is running, toggle queue membership
         if self.expand_running:
+            # Check if current file is already in queue
+            current_path = self.last_input_path
+            for i, job in enumerate(self._expand_queue):
+                if job.get("path") == current_path:
+                    # Remove from queue
+                    self._expand_queue.pop(i)
+                    self._update_queue_label()
+                    _status(self, f"Removed from queue")
+                    return
+            # Not in queue, add it
             self._add_to_queue(xml, api_key, backend, self.last_input_path)
-            messagebox.showinfo("Queued", f"Expansion queued. {len(self._expand_queue)} in queue.\n\nWill process automatically when current expansion finishes.", parent=self.root)
             return
         
         _run_expand_internal(self, xml, api_key, backend, retry=False)
@@ -1286,10 +1295,9 @@ class App:
             _show_api_error_dialog(self, "No API key set.", xml, is_retry=False)
             return
         
-        # If expansion is running, add to queue
+        # If expansion is running, add to queue (no toggle for re-expand)
         if self.expand_running:
             self._add_to_queue(xml, api_key, backend, self.last_input_path)
-            messagebox.showinfo("Queued", f"Re-expansion queued. {len(self._expand_queue)} in queue.\n\nWill process automatically when current expansion finishes.", parent=self.root)
             return
         
         _run_expand_internal(self, xml, api_key, backend, retry=False)
@@ -1303,7 +1311,7 @@ class App:
             "path": path,
         })
         self._update_queue_label()
-        _status(self, f"Queued ({len(self._expand_queue)} waiting)")
+        self._update_expand_button_text()
 
     def _process_next_in_queue(self) -> bool:
         """Process the next item in the queue. Returns True if there was an item to process."""
@@ -1348,11 +1356,25 @@ class App:
         else:
             self._queue_label_var.set("")
             self._clear_queue_btn.grid_remove()  # Hide Clear Q button
+        self._update_expand_button_text()
+    
+    def _update_expand_button_text(self) -> None:
+        """Update Expand button text to show queue count if running."""
+        if not self.expand_running:
+            self.expand_btn.config(text="Expand")
+            return
+        
+        count = len(self._expand_queue)
+        if count > 0:
+            self.expand_btn.config(text=f"Queued ({count})")
+        else:
+            self.expand_btn.config(text="Queued")
 
     def _clear_queue(self) -> None:
         """Clear all queued expansions."""
         self._expand_queue.clear()
         self._update_queue_label()
+        self._update_expand_button_text()
         _status(self, "Queue cleared")
 
     def _on_batch(self) -> None:
