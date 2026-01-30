@@ -23,26 +23,24 @@ RUN case "$TARGETARCH" in \
     | tar -I zstd -x -C /usr \
     && ollama --version
 
-# Python app
+# Python app (cache pip for faster rebuilds when deps unchanged)
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt \
-    && rm -rf /root/.cache/pip
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install -r requirements.txt
 
 COPY run_gemini.py examples.json ./
 COPY expand_diplomatic/ ./expand_diplomatic/
 
-# Bake Ollama model at build time (OLLAMA_MODELS);
-# serve in background, pull model, then stop.
+# Bake Ollama model at build time. Set SKIP_OLLAMA_PULL=1 to skip (faster CI builds).
 ENV OLLAMA_MODELS=/app/.ollama
-RUN mkdir -p /app/.ollama \
-    && sh -c 'ollama serve & OPID=$!; sleep 5; \
-    for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do \
-      curl -sf http://127.0.0.1:11434/api/tags >/dev/null && break; \
-      sleep 2; \
-    done; \
-    ollama pull "'"${OLLAMA_MODEL}"'"; \
-    kill $OPID 2>/dev/null || true; \
-    sleep 2'
+ARG SKIP_OLLAMA_PULL=
+RUN mkdir -p /app/.ollama && \
+    if [ -z "$SKIP_OLLAMA_PULL" ]; then \
+      ollama serve & OPID=$!; sleep 5; \
+      i=0; while [ $i -lt 30 ]; do curl -sf http://127.0.0.1:11434/api/tags >/dev/null && break; i=$((i+1)); sleep 2; done; \
+      ollama pull "${OLLAMA_MODEL}" || echo "Ollama pull failed; will pull at runtime."; \
+      kill $OPID 2>/dev/null || true; sleep 2; \
+    else echo "Skipping Ollama model pull."; fi
 
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 RUN chmod +x /app/docker-entrypoint.sh

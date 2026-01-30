@@ -3,8 +3,19 @@
 from __future__ import annotations
 
 import json
+import os
 import urllib.error
 import urllib.request
+
+
+def _ollama_timeout() -> int:
+    v = os.environ.get("OLLAMA_TIMEOUT", "").strip()
+    if v:
+        try:
+            return max(10, int(v))
+        except ValueError:
+            pass
+    return 120
 
 
 def run_local_rules(text: str, examples: list[dict[str, str]]) -> str:
@@ -53,8 +64,9 @@ def run_ollama(
         method="POST",
         headers={"Content-Type": "application/json"},
     )
+    timeout = _ollama_timeout()
     try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             out = json.loads(resp.read().decode("utf-8"))
     except (urllib.error.URLError, OSError) as e:
         raise RuntimeError(
@@ -62,6 +74,9 @@ def run_ollama(
         ) from e
     except json.JSONDecodeError as e:
         raise RuntimeError("Ollama returned invalid JSON.") from e
+    err = out.get("error")
+    if err:
+        raise RuntimeError(f"Ollama error: {err}")
     text = out.get("response") or ""
     return text.strip()
 

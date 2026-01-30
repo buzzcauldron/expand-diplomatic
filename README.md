@@ -1,238 +1,229 @@
 # Diplomatic Transcription Expander
 
-Expand diplomatic transcriptions to full form using the Gemini API. Input: TEI-like XML (or raw XML). Output: same XML with **only text inside elements** changed; structure is preserved.
+Turn abbreviated medieval Latin text (diplomatic transcriptions) into full, readable form. You give it an XML file with the original text; it gives back the same file with abbreviations expanded.
 
-- **Input**: local file path(s) or raw XML string  
-- **Output**: XML to XML  
-- **Examples**: configurable via `examples.json` (single pair now; add more over time)  
-- **Model**: Gemini (default `gemini-2.5-pro`; use `gemini-3-pro-preview` if you have access)
+**You need:** Python 3.10+ and (for online expansion) a free Gemini API key.
 
-## Setup
+---
+
+## Quick start (easiest way)
+
+1. **Install Python**  
+   If you don’t have it, download from [python.org](https://www.python.org/downloads/). On install, check “Add Python to PATH.”
+
+2. **Get an API key** (free)  
+   Go to [Google AI Studio](https://aistudio.google.com/apikey) and create an API key. You’ll paste it into the app.
+
+3. **Open the app**  
+   In a terminal/command prompt, go to the project folder and run:
+   ```bash
+   python gui.py
+   ```
+
+4. **Use it**  
+   - Click **Open…** and choose your XML file  
+   - Paste your API key when asked (or put it in a `.env` file once)  
+   - Click **Expand**  
+   - Click **Save…** when done
+
+---
+
+## Step-by-step setup
+
+### 1. Install dependencies
+
+Open a terminal (or Command Prompt on Windows) in the project folder and run:
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate   # or `.venv\Scripts\activate` on Windows
+```
+
+On **Mac/Linux:**
+```bash
+source .venv/bin/activate
+```
+
+On **Windows:**
+```bash
+.venv\Scripts\activate
+```
+
+Then:
+```bash
 pip install -r requirements.txt
 ```
 
-Set your API key (either method):
+*(These commands create an isolated environment and install the required libraries.)*
 
-```bash
-export GEMINI_API_KEY="your-api-key"
+### 2. Set your API key
+
+You have two options:
+
+**Option A – Paste when asked**  
+The app will ask for your key the first time you expand. You can choose to save it in a `.env` file so you don’t have to enter it again.
+
+**Option B – Save it beforehand**  
+Copy `.env.example` to `.env` in the project folder, open `.env` in a text editor, and add:
 ```
-
-**Store but don't commit:** Copy `.env.example` to `.env`, add your key, and use it locally. `.env` is gitignored — keep it active locally only; **never commit or push `.env` to GitHub**.
-
-Optional: `GEMINI_MODEL` (default `gemini-2.5-pro`), `EXPANDER_EXAMPLES` (path to examples JSON).
-
-## Examples file
-
-Edit `examples.json` (or the path you pass via `--examples`):
-
-```json
-[
-  { "diplomatic": "y^e same", "full": "the same" },
-  { "diplomatic": "another abbrev.", "full": "another abbreviation" }
-]
+GEMINI_API_KEY=your-api-key-here
 ```
+Get a key at [Google AI Studio](https://aistudio.google.com/apikey).
 
-Add as many pairs as you like; they are used as few-shot examples in the prompt. You can also **train locally** with the `train` subcommand (no API key required):
+**Important:** Never share or upload `.env` — it contains your secret key.
 
-```bash
-python -m expand_diplomatic train                    # interactive: add pairs one by one
-python -m expand_diplomatic train --list             # list current pairs
-python -m expand_diplomatic train --add -d "⁊c̃" -f "et cetera"   # add one pair
-python -m expand_diplomatic train --examples my.json --add -d "..." -f "..."
-```
+---
 
-All data stays local (`examples.json` or `--examples` path). These examples are used only when building prompts for the expander.
+## Using the graphical interface (GUI)
 
-## GUI
-
-A minimal Tkinter GUI (side‑by‑side input/output, Load / Expand / Save, train panel) is provided:
-
+Run:
 ```bash
 python gui.py
 ```
 
-Requires `tkinter` (usually bundled with Python). Set `GEMINI_API_KEY` or use `.env` before expanding. **Backend** (Gemini API / local Ollama) and **Modality** (full, conservative, normalize, aggressive) are aligned: choose both before Expand. Expansion is Latin-only; the model is instructed not to translate into English or other languages.
+### Main actions
 
-**API errors:** If expand fails (no key, 429, etc.), the GUI offers: **Enter API key** (paste key, optionally save to `.env`), **Use local model**, or **Use online Gemini**. You can also retry with the same setup. **Local model** tries Ollama first; if Ollama isn’t running, it falls back to **rule-based expansion** using your Train examples (no server). Retry always **reloads examples from disk** (retrain) so new pairs are used.
+| Button | What it does |
+|--------|--------------|
+| **Open…** | Load an XML file |
+| **Expand** | Expand abbreviations (online with Gemini or locally) |
+| **Save…** | Save the expanded result |
+| **Re-expand** | Run expansion again on the current output |
 
-**Startup:** The GUI and CLI use lazy imports so startup stays fast. The GUI loads only `examples_io` (no Gemini/lxml) until you click Expand; `train` never loads the expander.
+**Keyboard shortcuts:** Ctrl+O (Open), Ctrl+S (Save), Ctrl+E (Expand)
 
-## Command-line (CLI)
+### Settings
 
-Run via module or console script (after `pip install -e .`):
+- **Backend** – Use **Gemini** (online, needs API key) or **Local** (no key, uses rules or Ollama).
+- **Model** – Which Gemini model to use. Default is a good balance of speed and cost.
+- **Modality** – Expansion style: full, conservative, normalize, or aggressive.
+- **Parallel** – How many blocks to process at once. Lower this (e.g. 1) if you see rate limit errors.
+- **Auto-learn** – When on, the app saves new abbreviation pairs from each expansion to improve future runs.
 
-```bash
-python -m expand_diplomatic [expand] --file document.xml
-expand-diplomatic --file document.xml
+### If expansion fails
+
+- **No API key** – Paste your key when prompted, or add it to `.env`.
+- **Rate limit (429)** – Lower **Parallel** to 1, wait a minute, then try again.
+- **Timeout / hangs** – Try the **Local** backend, or add `GEMINI_TIMEOUT=60` to `.env`.
+- **Want to avoid the API** – Switch **Backend** to **Local**; the app will use rules and (if installed) Ollama.
+
+### Extra features
+
+- **Input→TXT** / **Output→TXT** – Export text blocks to plain `.txt` files.
+- **Click to sync** – Click a block in input or output to jump to the matching block in the other panel.
+- **Passes** – Run expansion more than once in a row to refine the text.
+
+---
+
+## Teaching the app (examples)
+
+The app learns from example pairs: “this abbreviation” → “this full form”.
+
+### In the GUI
+
+Use the **Train** section at the bottom:
+
+1. Type the abbreviated form in **Diplomatic** (or click **From input** to copy from a block).
+2. Type the full form in **Full** (or click **From output**).
+3. Click **Add pair**.
+
+### Or edit the examples file
+
+Open `examples.json` in a text editor. Add pairs like this:
+
+```json
+[
+  { "diplomatic": "grã", "full": "gratia" },
+  { "diplomatic": "tempꝰ", "full": "tempus" }
+]
 ```
 
-Subcommands:
+More examples = better results. The app also saves learned pairs from expansions when **Auto-learn** is on.
 
-- **expand** (default) — expand XML using Gemini or local Ollama  
-- **train** — add/list example pairs (see Examples file)
+---
 
-## Usage
+## Command-line usage
 
-**Text (raw XML string):**
-
+For single files:
 ```bash
-python -m expand_diplomatic --text "<TEI>...</TEI>"
+python -m expand_diplomatic --file document.xml
 ```
 
-**Single file:**
+Output is saved as `document_expanded.xml` next to the original.
 
+For many files:
 ```bash
-python -m expand_diplomatic --file path/to/document.xml
+python -m expand_diplomatic --batch-dir ./my_xml_folder --out-dir ./expanded
 ```
 
-**Batch (multiple files):**
-
-```bash
-python -m expand_diplomatic --batch a.xml b.xml c.xml
-```
-
-**Batch directory:**
-
-```bash
-python -m expand_diplomatic --batch-dir ./input_xml
-```
-
-**Local model** (Ollama if available, else rule-based from examples; no API key):
-
+Use the local backend (no API key):
 ```bash
 python -m expand_diplomatic --backend local --file document.xml
-python -m expand_diplomatic --backend local --local-model llama3.1 --batch-dir ./xml
 ```
 
-**API key:** use `GEMINI_API_KEY` / `GOOGLE_API_KEY` or `.env`, or `--api-key KEY`, or `--prompt-key` to be prompted interactively when missing.
+---
 
-**Output:**
+## File types and format
 
-- Single file: writes `*_expanded.xml` next to the input unless `--out` is given.  
-- Batch: uses `--out-dir` if set; otherwise writes `*_expanded.xml` next to each input.  
-- `--text`: prints expanded XML to stdout unless `--out` is used.
+- **Input:** XML files (e.g. TEI, PAGE XML).
+- **Output:** Same structure, with only the text inside elements changed.
+- **Blocks:** Paragraphs, lines, and similar elements (e.g. `p`, `l`, `Unicode` in PAGE) are expanded. Structure and attributes stay the same.
 
-**Options:**
+---
 
-- `--examples PATH` — path to `examples.json` (default: `./examples.json`)  
-- `--model ID` — Gemini model (default: `GEMINI_MODEL` or `gemini-2.5-pro`)  
-- `--backend {gemini,local}` — Gemini API or local (Ollama → rules fallback)  
-- `--local-model ID` — Ollama model when `--backend local` (default: `llama3.2`). If Ollama is down, rules from examples are used.  
-- `--modality {full,conservative,normalize,aggressive}` — expansion style (default: `full`). **Conservative**: abbreviations/superscripts only; **normalize**: spacing, punctuation, common abbreviations; **aggressive**: full modern prose. Output is Latin-only (no translation to English or other languages).  
-- `--api-key KEY` — Gemini API key (overrides env)  
-- `--prompt-key` — prompt for API key on stdin when missing  
-- `--out PATH` — output path (single file or `--text`)  
-- `--out-dir PATH` — output directory for batch runs  
-- `--files-api` — upload input file(s) via the [Gemini Files API](https://ai.google.dev/api/files) and pass them as context (`--file` / `--batch` only)  
-- `--dry-run` — skip LLM; leave block text unchanged
+## Advanced options
 
-## Files API
+- **Container (Docker):** See the Container section below if you prefer to run in Docker.
+- **Modality:** `full` (default), `conservative`, `normalize`, `aggressive` — control how much the text is modernized.
+- **Environment variables:**  
+  `GEMINI_MODEL`, `GEMINI_TIMEOUT`, `EXPANDER_MAX_CONCURRENT` and others can be set in `.env` or your system environment. See `.env.example` for details.
 
-With `--files-api`, input files are uploaded via the [Gemini Files API](https://ai.google.dev/api/files) and attached to each Gemini request as context. Gemini can use the full document when expanding each block. Use with `--file` or `--batch`:
-
-```bash
-python -m expand_diplomatic --file document.xml --files-api
-python -m expand_diplomatic --batch-dir ./xml --out-dir ./expanded --files-api
-```
-
-Standalone `run_gemini.py` also supports file upload:
-
-```bash
-python run_gemini.py --prompt "Summarize this." --file document.pdf
-```
+---
 
 ## Container (Docker)
 
-Use `run-container.sh` on **Mac**, **Linux**, or **Windows (WSL2)** to run `expand_diplomatic` in Docker. Paths are relative to the workspace (default: current directory), which is mounted at `/workspace`. Images support **linux/amd64** (x64) and **linux/arm64** (Mac Silicon, ARM). Optional: **linux/arm/v7** (32-bit ARM) via `--platform`; may need build deps in image.
-
-The image includes **Ollama** and a baked-in model (**llama3.2** by default). Use `--backend local` to expand with the local model and no API key; the container starts Ollama automatically.
+If you use Docker, you can run the app in a container:
 
 ```bash
 export GEMINI_API_KEY="your-api-key"
 ./run-container.sh --build -- --file sample.xml --out sample_expanded.xml
+```
 
-# Local model only (no API key):
+For local expansion only (no API key):
+```bash
 ./run-container.sh --build -- --backend local --file sample.xml --out sample_expanded.xml
 ```
 
-**Options:**
+You need [Docker](https://docs.docker.com/get-docker/) installed and running.
 
-- `--workspace DIR` — directory to mount at `/workspace` (default: `$(pwd)`).
-- `--build` — build the image before running (run once after clone or when Dockerfile changes).
-- `--platform PLAT` — use image for `linux/amd64` or `linux/arm64` (default: host).
-- `--` — everything after is passed to `expand_diplomatic`.
+---
 
-**Keep the local Ollama model updated:** set `OLLAMA_UPDATE_MODEL=1` (and optionally `OLLAMA_MODEL`, default `llama3.2`) before running. The container will `ollama pull` that model on each start so you stay on the latest version without rebuilding.
+## Troubleshooting
 
-```bash
-OLLAMA_UPDATE_MODEL=1 ./run-container.sh -- --backend local --file sample.xml --out sample_expanded.xml
-```
+| Problem | What to try |
+|---------|-------------|
+| “No module named …” | Run `pip install -r requirements.txt` (with your venv activated). |
+| “API key” error | Add your key to `.env` or paste it when the app asks. |
+| 429 / rate limit | Lower **Parallel** to 1 and wait before retrying. |
+| Slow or stuck | Use **Local** backend or set `GEMINI_TIMEOUT=60` in `.env`. |
+| “Ollama not reachable” | Either start Ollama (`ollama serve`) or ignore it — the app falls back to rule-based expansion. |
+| Wrong expansions | Add more example pairs in Train or `examples.json`. |
 
-**Examples:**
+---
 
-```bash
-./run-container.sh --build -- --file sample.xml --out sample_expanded.xml
-./run-container.sh --build -- --backend local --file sample.xml --out sample_expanded.xml
-./run-container.sh --workspace /path/to/xml -- --batch-dir . --out-dir ./expanded
-```
+## More options (CLI)
 
-Requires [Docker](https://docs.docker.com/get-docker/) and a running daemon.
+Useful flags when running from the command line:
 
-## Packaging (x64 & Mac Silicon)
+- `--examples PATH` — Use a different examples file
+- `--model ID` — Change Gemini model (e.g. `gemini-2.5-pro`)
+- `--modality {full,conservative,normalize,aggressive}` — Expansion style
+- `--passes N` — Run expansion multiple times (1–5)
+- `--files-api` — Upload the full file to Gemini for extra context
 
-**Wheels and sdist** (universal `py3-none-any`; works on x64 and Mac Silicon):
+See `.env.example` for environment variables (timeouts, retries, etc.).
 
-```bash
-pip install build wheel   # or: pip install -e ".[dev]"
-./scripts/build-packages.sh
-```
+---
 
-Output: `dist/` with `*.tar.gz` and `*.whl`. Install with `pip install dist/*.whl`.
+## Credits
 
-**Docker multi-arch** (linux/amd64, linux/arm64 — Mac, Linux, Windows via WSL2). The image installs **Ollama** and pulls **llama3.2** at build time; override with build args `OLLAMA_MODEL` or `OLLAMA_VERSION`:
-
-```bash
-./scripts/build-docker.sh          # build all platforms (includes Ollama + llama3.2)
-./scripts/build-docker.sh --load   # build native arch and load into Docker
-./scripts/build-docker.sh --push   # build and push to registry (set IMAGE_NAME)
-./scripts/build-docker.sh --platform linux/amd64,linux/arm64,linux/arm/v7  # add arm/v7 (may need build deps)
-
-docker build --build-arg OLLAMA_MODEL=llama3.2:1b -t expand-diplomatic .   # smaller/faster build
-```
-
-On **Windows**, use [Docker Desktop](https://docs.docker.com/desktop/install/windows-install/) with WSL2 and run `run-container.sh` from WSL or a Git Bash–style shell.
-
-**CI:** `.github/workflows/build.yml` builds wheels on `ubuntu-latest` and `macos-latest`, and Docker multi-arch `linux/amd64,linux/arm64` (no push). Docker build installs Ollama and pulls the default model, so it can take several minutes. Artifacts: `dist-ubuntu` and `dist-macos`.
-
-## Sample
-
-`sample.xml` is a minimal TEI example. Replace the placeholder entries in `examples.json` with your own diplomatic → full pairs, then run for example:
-
-```bash
-python -m expand_diplomatic --file sample.xml --out sample_expanded.xml
-```
-
-## Gemini integration
-
-Gemini is called via `run_gemini.py`, which supports the [Files API](https://ai.google.dev/api/files) for file uploads. Standalone:
-
-```bash
-python run_gemini.py --prompt "Your prompt" [--model gemini-2.5-pro] [--temperature 0.2] [--file path/to/file]
-```
-
-**Credit.** The `run_gemini.py` script follows the pattern from [ideasrule/latin_documents](https://github.com/ideasrule/latin_documents) (`google.genai` client, `GenerateContentConfig`).
-
-## Notes
-
-- Target elements: TEI-style blocks `p`, `ab`, `l`, `seg`, `item`, `td`, `th`, `head`, `figDesc`, plus PAGE `Unicode` (e.g. eScriptorium output). Configurable in code if needed.  
-- Only **text inside** those elements is modified; attributes and structure are kept.  
-- Nested blocks (e.g. `p` inside `div`) are handled so that only innermost blocks are expanded; parent structure is preserved.  
-- Provide at least one example pair in `examples.json` before running.  
-- To use **Gemini 2.5 Pro** or **Gemini 3 Pro** (if available), set `GEMINI_MODEL=gemini-2.5-pro` or `gemini-3-pro-preview`.
-- **Versioning:** [Semantic Versioning](https://semver.org/) (semver). Project version in `pyproject.toml` and `expand_diplomatic.__version__`; dependencies use compatible ranges (`>=X.Y.Z,<X+1`). `expand_diplomatic --version` prints the current version.
-- **Design:** See [docs/DESIGN.md](docs/DESIGN.md) for the **visual page editor** reference model (Transkribus, eScriptorium, PAGE Viewer, Scribe) and **language choice** (Python core; TypeScript/web or Python+Qt for the editor).
-- **Model capabilities:** See [docs/MODEL_CAPABILITIES.md](docs/MODEL_CAPABILITIES.md) for a **demo** (input → rules vs Ollama vs Gemini) and what each backend can do.
+The Gemini integration follows the approach from [ideasrule/latin_documents](https://github.com/ideasrule/latin_documents).
