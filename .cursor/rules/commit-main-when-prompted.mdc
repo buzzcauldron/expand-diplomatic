@@ -1,0 +1,9 @@
+---
+description: Commit only to main, and only when the user explicitly asks to commit
+alwaysApply: true
+---
+
+# Git commits
+
+- **Commit only when prompted.** Do not commit, push, or create branches unless the user explicitly asks you to (e.g. "commit this", "commit and push").
+- **Commit to main.** When committing, use the `main` branch. Do not create or switch to other branches for normal commits.
