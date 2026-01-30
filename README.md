@@ -98,7 +98,7 @@ python gui.py
 ### Settings
 
 - **Backend** – Use **Gemini** (online, needs API key) or **Local** (no key, uses rules or Ollama).
-- **Model** – Which Gemini model to use (hidden when Backend is Local). Default is a good balance of speed and cost. Click **⟳** to refresh the available models from the API.
+- **Model** – Which Gemini model to use (hidden when Backend is Local). Default: gemini-3-flash-preview. Click **⟳** to refresh the available models from the API.
 - **Modality** – How much to expand manuscript transcriptions: conservative, normalize, full, aggressive, or **local** (tuned for non-Gemini models like Ollama; not the default).
 - **Simul.** – How many blocks to process at once. Lower this (e.g. 1) if you see rate limit errors.
 - **Learn** – When on, the app saves new abbreviation pairs from each expansion to improve future runs.
@@ -316,7 +316,7 @@ Build native packages for different platforms:
 Useful flags when running from the command line:
 
 - `--examples PATH` — Use a different examples file
-- `--model ID` — Change Gemini model (e.g. `gemini-2.5-pro`)
+- `--model ID` — Change Gemini model (default: gemini-3-flash-preview)
 - `--modality {full,conservative,normalize,aggressive,local}` — Manuscript expansion mode (`local` is tuned for non-Gemini models)
 - `--passes N` — Run expansion multiple times (1–5)
 - `--files-api` — Upload the full file to Gemini for extra context

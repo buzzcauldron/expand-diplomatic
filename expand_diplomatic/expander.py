@@ -9,6 +9,8 @@ from typing import Any, Callable
 
 from lxml import etree
 
+from .gemini_models import DEFAULT_MODEL as _DEFAULT_GEMINI
+
 
 class ExpandCancelled(Exception):
     """Raised when expansion is cancelled by the user."""
@@ -297,7 +299,7 @@ def _serialize_root(root: etree._Element) -> str:
 def expand_xml(
     xml_source: str,
     examples: list[dict[str, str]],
-    model: str = "gemini-2.5-flash",
+    model: str | None = None,
     api_key: str | None = None,
     block_tags: set[str] | None = None,
     input_file_path: Path | None = None,
@@ -329,6 +331,8 @@ def expand_xml(
     - passes: number of expansion passes (default 1). When > 1, re-expands output to refine further.
     - cancel_check: optional () -> bool; if returns True, expansion stops and raises ExpandCancelled.
     """
+    if model is None:
+        model = _DEFAULT_GEMINI
     passes = max(1, min(5, passes))
     current = xml_source
     for pass_num in range(passes):
@@ -360,7 +364,7 @@ def expand_xml(
 def _expand_once(
     xml_source: str,
     examples: list[dict[str, str]],
-    model: str = "gemini-2.5-flash",
+    model: str | None = None,
     api_key: str | None = None,
     block_tags: set[str] | None = None,
     input_file_path: Path | None = None,
@@ -374,6 +378,8 @@ def _expand_once(
     cancel_check: Callable[[], bool] | None = None,
 ) -> str:
     """Single expansion pass. Used internally by expand_xml for recursive correction."""
+    if model is None:
+        model = _DEFAULT_GEMINI
     tags = block_tags or TEXT_BLOCK_TAGS
     root = etree.fromstring(xml_source.encode("utf-8"), etree.XMLParser(recover=True, remove_blank_text=False))
 

@@ -26,8 +26,8 @@ _FALLBACK_MODELS = (
     "gemini-3-pro-preview",
 )
 
-# Best price-performance model (default selection)
-DEFAULT_MODEL = "gemini-2.5-flash"
+# Default model (Gemini 3 Flash)
+DEFAULT_MODEL = "gemini-3-flash-preview"
 
 
 def _is_cache_valid() -> bool:

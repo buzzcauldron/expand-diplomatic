@@ -9,6 +9,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from expand_diplomatic.gemini_models import DEFAULT_MODEL as _DEFAULT_GEMINI
+
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _ENV_PATH = _PROJECT_ROOT / ".env"
 _ENV_EXAMPLE = _PROJECT_ROOT / ".env.example"
@@ -312,8 +314,8 @@ def main() -> None:
     ap.add_argument(
         "--model",
         type=str,
-        default=_env("GEMINI_MODEL", "gemini-2.5-flash"),
-        help="Gemini model (default: GEMINI_MODEL or gemini-2.5-flash)",
+        default=_env("GEMINI_MODEL", _DEFAULT_GEMINI),
+        help=f"Gemini model (default: GEMINI_MODEL or {_DEFAULT_GEMINI})",
     )
     ap.add_argument(
         "--backend",
