@@ -26,8 +26,9 @@ FALLBACK_MODELS = (
     "gemini-3-pro-preview",
 )
 
-# Default model (Gemini 3 Flash)
-DEFAULT_MODEL = "gemini-3-flash-preview"
+# Best value model (strongest price-to-performance for most use cases)
+BEST_VALUE_MODEL = "gemini-2.5-flash"
+DEFAULT_MODEL = BEST_VALUE_MODEL
 
 
 def _is_cache_valid() -> bool:
@@ -101,7 +102,6 @@ def _speed_sort_key(model_name: str) -> tuple[int, str]:
     Returns (priority, name) where lower priority = faster.
     """
     name_lower = model_name.lower()
-    
     # Priority order (lower = faster)
     if "flash-lite" in name_lower:
         return (0, model_name)
@@ -116,8 +116,19 @@ def _speed_sort_key(model_name: str) -> tuple[int, str]:
     elif "pro" in name_lower and "3" in name_lower:
         return (5, model_name)
     else:
-        # Unknown models go to end
         return (99, model_name)
+
+
+def get_speed_rank(model_name: str) -> int:
+    """Return speed rank 0 (fastest) to 5+ (slower) for display."""
+    return _speed_sort_key(model_name)[0]
+
+
+def format_model_with_speed(model_name: str) -> str:
+    """Return display label with small tick marks indicating speed (more = faster)."""
+    rank = get_speed_rank(model_name)
+    ticks = max(1, min(6, 6 - rank))  # 6 ticks for fastest, 1 for slowest
+    return f"{model_name} {'·' * ticks}"
 
 
 def get_available_models(api_key: Optional[str] = None, force_refresh: bool = False) -> tuple[str, ...]:
