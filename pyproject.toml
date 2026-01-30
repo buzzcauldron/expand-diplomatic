@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "expand-diplomatic"
+version = "0.1.0"
+description = "Expand diplomatic transcriptions to full form via Gemini API"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "google-genai>=1.0.0,<2.0.0",
+    "lxml>=5.0.0,<7.0.0",
+    "python-dotenv>=1.0.0,<2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "build>=1.0.0,<2",
+    "wheel",
+]
+
+[project.scripts]
+expand-diplomatic = "expand_diplomatic.__main__:main"
+
+[tool.setuptools]
+py-modules = ["run_gemini"]
+packages = ["expand_diplomatic"]
+
