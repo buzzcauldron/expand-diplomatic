@@ -182,7 +182,7 @@ def _expand_worker(
 
     def on_done() -> None:
         from run_gemini import format_api_error
-        app.expand_btn.config(state=tk.NORMAL)
+        app.expand_btn.config(state=tk.NORMAL, text="Expand")
         app.progress_bar["value"] = 0
         app.time_label_var.set("")
         app.cancel_btn.config(state=tk.DISABLED)
@@ -192,10 +192,14 @@ def _expand_worker(
         if err is not None:
             if isinstance(err, ExpandCancelled):
                 _status(app, "Cancelled.")
+                # Process next in queue even on cancel
+                app.root.after(100, lambda: app._process_next_in_queue())
                 return
             _status(app, "Idle")
             msg = format_api_error(err) if err else "Unknown error"
             _show_api_error_dialog(app, msg, xml, is_retry=True)
+            # Process next in queue even on error
+            app.root.after(100, lambda: app._process_next_in_queue())
             return
         # Save scroll position before updating
         try:
@@ -219,6 +223,9 @@ def _expand_worker(
         if backend == "gemini" and getattr(app, "auto_learn_var", None) and app.auto_learn_var.get():
             ex_path = Path(app.examples_var.get().strip() or str(DEFAULT_EXAMPLES))
             _schedule_auto_learn(app, xml, result or "", ex_path, model=model)
+        
+        # Process next item in queue if any
+        app.root.after(100, lambda: app._process_next_in_queue())
 
     app.root.after(0, on_done)
 
@@ -469,8 +476,8 @@ def _run_expand_internal(
     except (ValueError, AttributeError):
         passes = 1
     _status(app, "Expanding…")
-    if backend != "local":
-        app.expand_btn.config(state=tk.DISABLED)
+    # Change Expand button to show "Queue" while running
+    app.expand_btn.config(text="Queue")
     app.last_expand_xml = xml
     app.last_expand_api_key = api_key
     app.last_expand_backend = backend
@@ -563,6 +570,9 @@ class App:
         self._batch_files: list[Path] = []
         self._batch_status: dict[str, str] = {}  # filename -> "pending"/"processing"/"done"/"failed"
         self._batch_panel_expanded = False
+        # Expansion queue
+        self._expand_queue: list[dict] = []  # List of {"xml": str, "api_key": str|None, "backend": str, "path": Path|None}
+        self._queue_label_var = tk.StringVar(value="")
 
         self._build_toolbar()
         self._build_main()
@@ -938,11 +948,23 @@ class App:
             font=("", 9), fg="white"
         )
         self._format_label.grid(row=0, column=3, sticky=tk.W, padx=(4, 2), pady=2)
+        # Queue label
+        self._queue_label = tk.Label(
+            status_frame, textvariable=self._queue_label_var, width=10, anchor=tk.CENTER,
+            font=("", 9), fg="#88ff88"
+        )
+        self._queue_label.grid(row=0, column=4, sticky=tk.W, padx=(2, 2), pady=2)
+        # Clear queue button (only visible when queue has items)
+        self._clear_queue_btn = tk.Button(
+            status_frame, text="Clear Q", command=self._clear_queue, width=6, font=("", 8)
+        )
+        self._clear_queue_btn.grid(row=0, column=5, padx=(2, 2), pady=2)
+        self._clear_queue_btn.grid_remove()  # Hidden by default
         # Cancel button
         self.cancel_btn = tk.Button(
             status_frame, text="Cancel", command=self._on_cancel_expand, state=tk.DISABLED
         )
-        self.cancel_btn.grid(row=0, column=4, padx=(2, 4), pady=2)
+        self.cancel_btn.grid(row=0, column=6, padx=(2, 4), pady=2)
 
     def _get_block_ranges_cached(self, content: str) -> list[tuple[int, int]]:
         """Block ranges for content, cached to avoid re-parsing on repeated clicks."""
@@ -1152,6 +1174,13 @@ class App:
         if backend == "gemini" and not api_key:
             _show_api_error_dialog(self, "No API key set.", xml, is_retry=False)
             return
+        
+        # If expansion is running, add to queue
+        if self.expand_running:
+            self._add_to_queue(xml, api_key, backend, self.last_input_path)
+            messagebox.showinfo("Queued", f"Expansion queued. {len(self._expand_queue)} in queue.\n\nWill process automatically when current expansion finishes.", parent=self.root)
+            return
+        
         _run_expand_internal(self, xml, api_key, backend, retry=False)
 
     def _on_reexpand(self) -> None:
@@ -1170,7 +1199,75 @@ class App:
         if backend == "gemini" and not api_key:
             _show_api_error_dialog(self, "No API key set.", xml, is_retry=False)
             return
+        
+        # If expansion is running, add to queue
+        if self.expand_running:
+            self._add_to_queue(xml, api_key, backend, self.last_input_path)
+            messagebox.showinfo("Queued", f"Re-expansion queued. {len(self._expand_queue)} in queue.\n\nWill process automatically when current expansion finishes.", parent=self.root)
+            return
+        
         _run_expand_internal(self, xml, api_key, backend, retry=False)
+
+    def _add_to_queue(self, xml: str, api_key: str | None, backend: str, path: Path | None = None) -> None:
+        """Add an expansion job to the queue."""
+        self._expand_queue.append({
+            "xml": xml,
+            "api_key": api_key,
+            "backend": backend,
+            "path": path,
+        })
+        self._update_queue_label()
+        _status(self, f"Queued ({len(self._expand_queue)} waiting)")
+
+    def _process_next_in_queue(self) -> bool:
+        """Process the next item in the queue. Returns True if there was an item to process."""
+        if not self._expand_queue:
+            self._update_queue_label()
+            return False
+        
+        job = self._expand_queue.pop(0)
+        self._update_queue_label()
+        
+        # Load the XML for the queued job
+        xml = job["xml"]
+        api_key = job["api_key"]
+        backend = job["backend"]
+        path = job.get("path")
+        
+        # Update input panel if path is available
+        if path and path.exists():
+            try:
+                xml = path.read_text(encoding="utf-8")
+                self.input_txt.delete("1.0", tk.END)
+                self.input_txt.insert("1.0", xml)
+                self.last_input_path = path
+                self.original_input = xml
+            except Exception:
+                pass  # Use the saved XML if file read fails
+        else:
+            # Use the queued XML
+            self.input_txt.delete("1.0", tk.END)
+            self.input_txt.insert("1.0", xml)
+        
+        # Start expansion
+        _run_expand_internal(self, xml, api_key, backend, retry=False)
+        return True
+
+    def _update_queue_label(self) -> None:
+        """Update the queue status label and show/hide Clear Q button."""
+        count = len(self._expand_queue)
+        if count > 0:
+            self._queue_label_var.set(f"Queue: {count}")
+            self._clear_queue_btn.grid()  # Show Clear Q button
+        else:
+            self._queue_label_var.set("")
+            self._clear_queue_btn.grid_remove()  # Hide Clear Q button
+
+    def _clear_queue(self) -> None:
+        """Clear all queued expansions."""
+        self._expand_queue.clear()
+        self._update_queue_label()
+        _status(self, "Queue cleared")
 
     def _on_batch(self) -> None:
         """Open folder dialog and batch-expand all XML files in parallel."""
