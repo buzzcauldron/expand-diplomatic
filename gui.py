@@ -476,8 +476,8 @@ def _run_expand_internal(
     except (ValueError, AttributeError):
         passes = 1
     _status(app, "Expanding…")
-    # Change Expand button to show "Queue" while running
-    app.expand_btn.config(text="Queue")
+    # Change Expand button to show "Queued" while running
+    app.expand_btn.config(text="Queued")
     app.last_expand_xml = xml
     app.last_expand_api_key = api_key
     app.last_expand_backend = backend
