@@ -4,11 +4,11 @@
     "full": "et cetera"
   },
   {
-    "diplomatic": "dĩ",
+    "diplomatic": "dĩ",
     "full": "dei"
   },
   {
-    "diplomatic": "grã",
+    "diplomatic": "grã",
     "full": "gratia"
   },
   {
@@ -32,15 +32,15 @@
     "full": "capituli"
   },
   {
-    "diplomatic": "Eboraceñ",
+    "diplomatic": "Eboraceñ",
     "full": "Eboracensis"
   },
   {
-    "diplomatic": "dño",
+    "diplomatic": "dño",
     "full": "domino"
   },
   {
-    "diplomatic": "Wichtoñ",
+    "diplomatic": "Wichtoñ",
     "full": "Wighton"
   },
   {
@@ -60,7 +60,7 @@
     "full": "liberaliter"
   },
   {
-    "diplomatic": "atq",
+    "diplomatic": "atq",
     "full": "atque"
   },
   {
@@ -70,5 +70,581 @@
   {
     "diplomatic": "⁊",
     "full": "et"
+  },
+  {
+    "diplomatic": "ꝓ",
+    "full": "pro"
+  },
+  {
+    "diplomatic": "q̃",
+    "full": "quae"
+  },
+  {
+    "diplomatic": "qꝫ",
+    "full": "quod"
+  },
+  {
+    "diplomatic": "q̊",
+    "full": "qui"
+  },
+  {
+    "diplomatic": "qs",
+    "full": "quis"
+  },
+  {
+    "diplomatic": "q̄",
+    "full": "quam"
+  },
+  {
+    "diplomatic": "m̃",
+    "full": "mihi"
+  },
+  {
+    "diplomatic": "nõ",
+    "full": "non"
+  },
+  {
+    "diplomatic": "nõie",
+    "full": "nomine"
+  },
+  {
+    "diplomatic": "ōes",
+    "full": "omnes"
+  },
+  {
+    "diplomatic": "ōia",
+    "full": "omnia"
+  },
+  {
+    "diplomatic": "ōis",
+    "full": "omnis"
+  },
+  {
+    "diplomatic": "ōm",
+    "full": "omnium"
+  },
+  {
+    "diplomatic": "ꝑsona",
+    "full": "persona"
+  },
+  {
+    "diplomatic": "ꝑsonas",
+    "full": "personas"
+  },
+  {
+    "diplomatic": "ꝑsonarũ",
+    "full": "personarum"
+  },
+  {
+    "diplomatic": "ꝑtinet",
+    "full": "pertinet"
+  },
+  {
+    "diplomatic": "ꝑtinēt",
+    "full": "pertinent"
+  },
+  {
+    "diplomatic": "p̄",
+    "full": "prae"
+  },
+  {
+    "diplomatic": "p̃",
+    "full": "pri"
+  },
+  {
+    "diplomatic": "p̾",
+    "full": "pre"
+  },
+  {
+    "diplomatic": "ꝑmissione",
+    "full": "permissione"
+  },
+  {
+    "diplomatic": "ꝑmissu",
+    "full": "permissu"
+  },
+  {
+    "diplomatic": "dns",
+    "full": "dominus"
+  },
+  {
+    "diplomatic": "dñs",
+    "full": "dominus"
+  },
+  {
+    "diplomatic": "dñi",
+    "full": "domini"
+  },
+  {
+    "diplomatic": "dñm",
+    "full": "dominum"
+  },
+  {
+    "diplomatic": "ecõ",
+    "full": "ergo"
+  },
+  {
+    "diplomatic": "erõ",
+    "full": "ergo"
+  },
+  {
+    "diplomatic": "iũ",
+    "full": "ium"
+  },
+  {
+    "diplomatic": "h̃",
+    "full": "habet"
+  },
+  {
+    "diplomatic": "hões",
+    "full": "homines"
+  },
+  {
+    "diplomatic": "hr̃es",
+    "full": "heredes"
+  },
+  {
+    "diplomatic": "hr̃edibꝫ",
+    "full": "heredibus"
+  },
+  {
+    "diplomatic": "ibꝫ",
+    "full": "ibus"
+  },
+  {
+    "diplomatic": "iõe",
+    "full": "ione"
+  },
+  {
+    "diplomatic": "iõem",
+    "full": "ionem"
+  },
+  {
+    "diplomatic": "iõi",
+    "full": "ioni"
+  },
+  {
+    "diplomatic": "nr̃",
+    "full": "noster"
+  },
+  {
+    "diplomatic": "nr̃a",
+    "full": "nostra"
+  },
+  {
+    "diplomatic": "nr̃o",
+    "full": "nostro"
+  },
+  {
+    "diplomatic": "nr̃os",
+    "full": "nostros"
+  },
+  {
+    "diplomatic": "nr̃is",
+    "full": "nostris"
+  },
+  {
+    "diplomatic": "nr̃ũ",
+    "full": "nostrum"
+  },
+  {
+    "diplomatic": "mr̃",
+    "full": "mister"
+  },
+  {
+    "diplomatic": "m̃is",
+    "full": "magistris"
+  },
+  {
+    "diplomatic": "mr̃o",
+    "full": "magistro"
+  },
+  {
+    "diplomatic": "rñ",
+    "full": "rum"
+  },
+  {
+    "diplomatic": "rũ",
+    "full": "rum"
+  },
+  {
+    "diplomatic": "scđm",
+    "full": "secundum"
+  },
+  {
+    "diplomatic": "scõm",
+    "full": "secundum"
+  },
+  {
+    "diplomatic": "scl̃m",
+    "full": "scilicet"
+  },
+  {
+    "diplomatic": "sr̃e",
+    "full": "sancte"
+  },
+  {
+    "diplomatic": "scs",
+    "full": "sanctus"
+  },
+  {
+    "diplomatic": "sca",
+    "full": "sancta"
+  },
+  {
+    "diplomatic": "scm",
+    "full": "sanctum"
+  },
+  {
+    "diplomatic": "sci",
+    "full": "sancti"
+  },
+  {
+    "diplomatic": "scõ",
+    "full": "sancto"
+  },
+  {
+    "diplomatic": "sctã",
+    "full": "sanctam"
+  },
+  {
+    "diplomatic": "sctoꝝ",
+    "full": "sanctorum"
+  },
+  {
+    "diplomatic": "tm̃",
+    "full": "tamen"
+  },
+  {
+    "diplomatic": "tñ",
+    "full": "tamen"
+  },
+  {
+    "diplomatic": "tñr",
+    "full": "tenetur"
+  },
+  {
+    "diplomatic": "tn̄r",
+    "full": "tenetur"
+  },
+  {
+    "diplomatic": "tn̄re",
+    "full": "tenere"
+  },
+  {
+    "diplomatic": "tr̃a",
+    "full": "terra"
+  },
+  {
+    "diplomatic": "tr̃am",
+    "full": "terram"
+  },
+  {
+    "diplomatic": "tr̃as",
+    "full": "terras"
+  },
+  {
+    "diplomatic": "tr̃is",
+    "full": "terris"
+  },
+  {
+    "diplomatic": "tr̃arũ",
+    "full": "terrarum"
+  },
+  {
+    "diplomatic": "uñ",
+    "full": "um"
+  },
+  {
+    "diplomatic": "uũ",
+    "full": "uum"
+  },
+  {
+    "diplomatic": "vñ",
+    "full": "um"
+  },
+  {
+    "diplomatic": "vũ",
+    "full": "uum"
+  },
+  {
+    "diplomatic": "vl̃t",
+    "full": "vult"
+  },
+  {
+    "diplomatic": "vol̃t",
+    "full": "volunt"
+  },
+  {
+    "diplomatic": "xp̄i",
+    "full": "Christi"
+  },
+  {
+    "diplomatic": "xp̄o",
+    "full": "Christo"
+  },
+  {
+    "diplomatic": "xp̄m",
+    "full": "Christum"
+  },
+  {
+    "diplomatic": "Xp̄s",
+    "full": "Christus"
+  },
+  {
+    "diplomatic": "Ihũ",
+    "full": "Iesu"
+  },
+  {
+    "diplomatic": "Ih̄u",
+    "full": "Iesu"
+  },
+  {
+    "diplomatic": "ep̄i",
+    "full": "episcopi"
+  },
+  {
+    "diplomatic": "ep̄o",
+    "full": "episcopo"
+  },
+  {
+    "diplomatic": "ep̄m",
+    "full": "episcopum"
+  },
+  {
+    "diplomatic": "ep̄s",
+    "full": "episcopus"
+  },
+  {
+    "diplomatic": "ap̄li",
+    "full": "apostoli"
+  },
+  {
+    "diplomatic": "ap̄lo",
+    "full": "apostolo"
+  },
+  {
+    "diplomatic": "ap̄lus",
+    "full": "apostolus"
+  },
+  {
+    "diplomatic": "p̃mo",
+    "full": "primo"
+  },
+  {
+    "diplomatic": "p̃ma",
+    "full": "prima"
+  },
+  {
+    "diplomatic": "p̃mũ",
+    "full": "primum"
+  },
+  {
+    "diplomatic": "scđo",
+    "full": "secundo"
+  },
+  {
+    "diplomatic": "scđa",
+    "full": "secunda"
+  },
+  {
+    "diplomatic": "t̄cio",
+    "full": "tercio"
+  },
+  {
+    "diplomatic": "t̄cia",
+    "full": "tercia"
+  },
+  {
+    "diplomatic": "qñto",
+    "full": "quinto"
+  },
+  {
+    "diplomatic": "sxto",
+    "full": "sexto"
+  },
+  {
+    "diplomatic": "sp̃s",
+    "full": "spiritus"
+  },
+  {
+    "diplomatic": "sp̃m",
+    "full": "spiritum"
+  },
+  {
+    "diplomatic": "sp̃i",
+    "full": "spiriti"
+  },
+  {
+    "diplomatic": "sp̃alis",
+    "full": "spiritualis"
+  },
+  {
+    "diplomatic": "sp̃aliter",
+    "full": "spiritualiter"
+  },
+  {
+    "diplomatic": "tn̄",
+    "full": "tunc"
+  },
+  {
+    "diplomatic": "tn̄c",
+    "full": "tunc"
+  },
+  {
+    "diplomatic": "qn̄",
+    "full": "quando"
+  },
+  {
+    "diplomatic": "qñ",
+    "full": "quando"
+  },
+  {
+    "diplomatic": "añ",
+    "full": "anno"
+  },
+  {
+    "diplomatic": "aññ",
+    "full": "annis"
+  },
+  {
+    "diplomatic": "aññ",
+    "full": "annos"
+  },
+  {
+    "diplomatic": "tn̄te",
+    "full": "tenente"
+  },
+  {
+    "diplomatic": "tn̄tibus",
+    "full": "tenentibus"
+  },
+  {
+    "diplomatic": "cōtra",
+    "full": "contra"
+  },
+  {
+    "diplomatic": "cõtra",
+    "full": "contra"
+  },
+  {
+    "diplomatic": "intr̃",
+    "full": "inter"
+  },
+  {
+    "diplomatic": "cū",
+    "full": "cum"
+  },
+  {
+    "diplomatic": "cũ",
+    "full": "cum"
+  },
+  {
+    "diplomatic": "scđũ",
+    "full": "secundum"
+  },
+  {
+    "diplomatic": "cõmune",
+    "full": "commune"
+  },
+  {
+    "diplomatic": "cõmunia",
+    "full": "communia"
+  },
+  {
+    "diplomatic": "cõmunis",
+    "full": "communis"
+  },
+  {
+    "diplomatic": "ãma",
+    "full": "anima"
+  },
+  {
+    "diplomatic": "ãmã",
+    "full": "animam"
+  },
+  {
+    "diplomatic": "ãmas",
+    "full": "animas"
+  },
+  {
+    "diplomatic": "ãmarũ",
+    "full": "animarum"
+  },
+  {
+    "diplomatic": "ꝑfectus",
+    "full": "perfectus"
+  },
+  {
+    "diplomatic": "ꝑfecte",
+    "full": "perfecte"
+  },
+  {
+    "diplomatic": "ꝑfecta",
+    "full": "perfecta"
+  },
+  {
+    "diplomatic": "ꝑmittere",
+    "full": "permittere"
+  },
+  {
+    "diplomatic": "ꝑmittit",
+    "full": "permittit"
+  },
+  {
+    "diplomatic": "ꝑmisit",
+    "full": "permisit"
+  },
+  {
+    "diplomatic": "pꝛ",
+    "full": "par"
+  },
+  {
+    "diplomatic": "pꝛte",
+    "full": "parte"
+  },
+  {
+    "diplomatic": "pꝛtem",
+    "full": "partem"
+  },
+  {
+    "diplomatic": "pꝛtes",
+    "full": "partes"
+  },
+  {
+    "diplomatic": "pꝛtibꝫ",
+    "full": "partibus"
+  },
+  {
+    "diplomatic": "q̃re",
+    "full": "quare"
+  },
+  {
+    "diplomatic": "q̃rere",
+    "full": "querere"
+  },
+  {
+    "diplomatic": "q̃ritur",
+    "full": "queritur"
+  },
+  {
+    "diplomatic": "q̃stio",
+    "full": "questio"
+  },
+  {
+    "diplomatic": "q̃stioẽ",
+    "full": "questionem"
+  },
+  {
+    "diplomatic": "qñq̃",
+    "full": "quandoque"
+  },
+  {
+    "diplomatic": "qñqñ",
+    "full": "quandoquidem"
+  },
+  {
+    "diplomatic": "qñcũq̃",
+    "full": "quandocumque"
   }
 ]
