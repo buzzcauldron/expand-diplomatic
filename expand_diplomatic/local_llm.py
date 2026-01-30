@@ -56,15 +56,19 @@ def run_ollama(
     base_url: str = "http://localhost:11434",
     *,
     system: str | None = None,
+    high_end_gpu: bool = False,
 ) -> str:
     """
     Send prompt to Ollama /api/generate and return the generated text.
     Raises RuntimeError if Ollama is unreachable or returns an error.
+    high_end_gpu: when True, use larger context (num_ctx=8192) for more examples.
     """
     url = f"{base_url.rstrip('/')}/api/generate"
     body: dict = {"model": model, "prompt": prompt, "stream": False}
     if system is not None:
         body["system"] = system
+    if high_end_gpu:
+        body["options"] = {"num_ctx": 8192}
     data = json.dumps(body).encode("utf-8")
     req = urllib.request.Request(
         url,
@@ -97,13 +101,18 @@ def run_local(
     base_url: str = "http://localhost:11434",
     *,
     sorted_pairs: list[tuple[str, str]] | None = None,
+    high_end_gpu: bool = False,
 ) -> str:
     """
     Try Ollama first; if unreachable, fall back to rule-based expansion using examples.
     Always succeeds when examples are available.
     sorted_pairs: optional pre-sorted (dip, full) to avoid per-block sort.
+    high_end_gpu: when True, use larger context for Ollama (aggressive local training).
     """
     try:
-        return run_ollama(prompt, model=model, base_url=base_url)
+        return run_ollama(
+            prompt, model=model, base_url=base_url,
+            high_end_gpu=high_end_gpu,
+        )
     except RuntimeError:
         return run_local_rules(text, examples=examples, sorted_pairs=sorted_pairs)

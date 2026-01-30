@@ -15,17 +15,36 @@ class ExpandCancelled(Exception):
 
 
 def _get_max_concurrent(backend: str) -> int:
-    """Max parallel block expansions. Env EXPANDER_MAX_CONCURRENT overrides."""
+    """Max parallel block expansions. Env EXPANDER_MAX_CONCURRENT overrides.
+    When backend=local and high-end GPU detected, default is 12."""
     v = os.environ.get("EXPANDER_MAX_CONCURRENT", "").strip()
     if v:
         try:
             return max(1, min(16, int(v)))
         except ValueError:
             pass
-    return 6 if backend == "local" else 2
+    if backend == "local":
+        try:
+            from .gpu_detect import detect_high_end_gpu
+            if detect_high_end_gpu():
+                return 12
+        except Exception:
+            pass
+        return 6
+    return 2
 
-# TEI-style block elements + PAGE Unicode (local names, any namespace)
+# TEI-style block elements + PAGE XML Unicode (local names, any namespace)
+# PAGE XML: elements like <Unicode> inside <TextEquiv> are expanded in place
+# TEI: elements like <p>, <ab>, <l>, <seg> are expanded
 TEXT_BLOCK_TAGS = frozenset({"p", "ab", "l", "seg", "item", "td", "th", "figDesc", "head", "Unicode"})
+
+# PAGE XML namespace prefix for detection
+PAGE_XML_NS = "http://schema.primaresearch.org/PAGE/gts/pagecontent"
+
+
+def is_page_xml(xml_source: str) -> bool:
+    """Check if the XML source is PAGE XML format (has PAGE namespace)."""
+    return PAGE_XML_NS in xml_source
 
 
 def _escape_xml_text(s: str) -> str:
@@ -146,30 +165,34 @@ def extract_text_lines(xml_source: str, block_tags: set[str] | None = None) -> s
     return "\n".join(lines)
 
 MODALITIES = ("full", "conservative", "normalize", "aggressive", "local")
-_LATIN = " Keep the full (expanded) form in Latin. Do not translate to English or any other language."
+_LATIN = " Keep the expanded form in Latin. Do not translate to English or any other language."
 MODALITY_SYSTEM: dict[str, str] = {
-    "full": (
-        "You expand diplomatic transcriptions into full, readable form. "
-        "Resolve abbreviations, expand superscripts, normalize punctuation and spacing."
-        + _LATIN + " Output only the expanded text, no XML, no commentary."
-    ),
     "conservative": (
-        "Expand abbreviations and superscripts only. Keep original wording, punctuation, and spelling where possible. "
-        "Do not modernize or paraphrase."
+        "Expand manuscript diplomatic transcriptions accurately. "
+        "Resolve abbreviations and superscripts only. Preserve original wording, spelling, and punctuation. "
+        "Do not paraphrase or change the text beyond expansion."
         + _LATIN + " Output only the expanded text, no XML, no commentary."
     ),
     "normalize": (
-        "Normalize spacing and punctuation; expand common abbreviations and superscripts. "
-        "Keep the text close to the diplomatic form."
+        "Expand manuscript diplomatic transcriptions accurately. "
+        "Resolve abbreviations and superscripts; normalize spacing and punctuation where needed. "
+        "Keep the text close to the diplomatic form; do not paraphrase."
+        + _LATIN + " Output only the expanded text, no XML, no commentary."
+    ),
+    "full": (
+        "Expand manuscript diplomatic transcriptions accurately into full, readable form. "
+        "Resolve abbreviations, expand superscripts, normalize punctuation and spacing. "
+        "Remain faithful to the source."
         + _LATIN + " Output only the expanded text, no XML, no commentary."
     ),
     "aggressive": (
-        "Fully expand to modern, readable Latin prose. Resolve all abbreviations, expand superscripts, "
-        "normalize punctuation and spacing, and lightly modernize wording where it aids clarity."
+        "Expand manuscript diplomatic transcriptions accurately and fully. "
+        "Resolve all abbreviations and superscripts; normalize punctuation and spacing. "
+        "Produce clear, readable Latin while staying faithful to the manuscript. Do not paraphrase."
         + _LATIN + " Output only the expanded text, no XML, no commentary."
     ),
     "local": (
-        "Expand diplomatic transcriptions: resolve abbreviations and superscripts."
+        "Expand manuscript diplomatic transcriptions accurately: resolve abbreviations and superscripts."
         + _LATIN
         + " Output only the expanded text, no XML, no commentary. Use the examples as your guide."
     ),
@@ -242,6 +265,7 @@ def _expand_text_block(
     uploaded_file: Any = None,
     prompt_prefix: str | None = None,
     sorted_pairs: list[tuple[str, str]] | None = None,
+    high_end_gpu: bool = False,
 ) -> str:
     if not text or not text.strip():
         return text
@@ -249,7 +273,10 @@ def _expand_text_block(
     if backend == "local":
         from .local_llm import run_local
 
-        return run_local(text, examples, prompt, model=model, sorted_pairs=sorted_pairs)
+        return run_local(
+            text, examples, prompt, model=model,
+            sorted_pairs=sorted_pairs, high_end_gpu=high_end_gpu,
+        )
     from run_gemini import run_gemini
 
     system = MODALITY_SYSTEM.get(modality) or MODALITY_SYSTEM["full"]
@@ -391,6 +418,13 @@ def _expand_once(
     # When using Files API, use sequential to avoid shared client issues
     if client is not None and uploaded_file is not None:
         max_concurrent = 1
+    high_end_gpu = False
+    if not dry_run and backend == "local":
+        try:
+            from .gpu_detect import detect_high_end_gpu
+            high_end_gpu = detect_high_end_gpu()
+        except Exception:
+            pass
     # Prebuild prompt prefix: Gemini uses examples-only + system_instruction; local uses combined.
     prompt_prefix: str | None = None
     sorted_pairs: list[tuple[str, str]] | None = None
@@ -423,6 +457,7 @@ def _expand_once(
                 uploaded_file=uploaded_file,
                 prompt_prefix=prompt_prefix,
                 sorted_pairs=sorted_pairs,
+                high_end_gpu=high_end_gpu,
             )
         return (i, el, expanded)
 

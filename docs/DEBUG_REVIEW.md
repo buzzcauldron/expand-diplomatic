@@ -15,6 +15,7 @@
 - **Cancel flow**: User Cancel sets `cancel_requested`; expander checks it between blocks; `on_done` treats `ExpandCancelled` as “Cancelled” (no error dialog).
 - **Run ID**: Prevents overwriting output when user starts a new expand while a previous one finishes.
 - **Thread safety**: All UI updates still use `app.root.after(0, ...)`.
+- **Backend sync**: When switching backend via error dialog (Use local / Use online / Retry), call `_on_backend_change()` so Model dropdown and Parallel spinbox stay in sync.
 
 ## Container Build
 

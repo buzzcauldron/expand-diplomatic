@@ -218,15 +218,40 @@ def _run_expand(args: argparse.Namespace) -> None:
         print("Provide one of: --text, --file, --batch, --batch-dir", file=sys.stderr)
         sys.exit(1)
 
+    # Skip already-expanded files to avoid re-expanding
+    files = [f for f in files if not f.stem.endswith("_expanded")]
+
     if not files:
-        print("No XML files to process.", file=sys.stderr)
+        print("No XML files to process (excluding *_expanded.xml).", file=sys.stderr)
         return
 
     out_dir = args.out_dir
-    for f in files:
-        xml = f.read_text(encoding="utf-8")
-        out_path = (out_dir / f"{f.stem}_expanded.xml") if out_dir else (f.parent / f"{f.stem}_expanded.xml")
-        run(xml, out_path, fpath=f, files_api=args.files_api)
+    parallel_files = max(1, min(16, getattr(args, "parallel_files", 1) or 1))
+
+    def process_file(f: Path) -> tuple[Path, bool, str]:
+        """Process one file, return (path, success, message)."""
+        try:
+            xml = f.read_text(encoding="utf-8")
+            out_path = (out_dir / f"{f.stem}_expanded.xml") if out_dir else (f.parent / f"{f.stem}_expanded.xml")
+            run(xml, out_path, fpath=f, files_api=args.files_api)
+            return (f, True, f"OK: {f.name}")
+        except Exception as e:
+            return (f, False, f"FAIL: {f.name}: {e}")
+
+    if parallel_files <= 1:
+        # Sequential
+        for f in files:
+            _, ok, msg = process_file(f)
+            print(msg, file=sys.stderr)
+    else:
+        # Parallel files
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        print(f"Processing {len(files)} files ({parallel_files} in parallel)…", file=sys.stderr)
+        with ThreadPoolExecutor(max_workers=parallel_files) as executor:
+            futures = {executor.submit(process_file, f): f for f in files}
+            for future in as_completed(futures):
+                _, ok, msg = future.result()
+                print(msg, file=sys.stderr)
 
 
 def _run_test_gemini(args: argparse.Namespace) -> None:
@@ -337,6 +362,13 @@ def main() -> None:
     )
     ap.add_argument("--out", type=Path, help="Output path (single file or --text)")
     ap.add_argument("--out-dir", type=Path, help="Output directory for batch")
+    ap.add_argument(
+        "--parallel-files",
+        type=int,
+        default=1,
+        metavar="N",
+        help="Process N files in parallel for batch (default 1 = sequential)",
+    )
     ap.add_argument(
         "--files-api",
         action="store_true",

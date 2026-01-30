@@ -39,12 +39,12 @@ DEFAULT_EXAMPLES = ROOT_DIR / "examples.json"
 BACKENDS = ("gemini", "local")
 MODALITIES = ("full", "conservative", "normalize", "aggressive", "local")
 GEMINI_MODELS = (
-    "gemini-2.5-flash",       # Best price-performance (default)
-    "gemini-2.0-flash",       # Fast, good quality
-    "gemini-2.5-flash-lite",  # Fastest, most cost-efficient
-    "gemini-3-flash-preview", # Latest Flash
-    "gemini-2.5-pro",         # Pro (stable)
-    "gemini-3-pro-preview",   # Pro 3
+    "gemini-2.5-flash-lite",  # Fastest
+    "gemini-3-flash-preview",
+    "gemini-2.0-flash",
+    "gemini-2.5-flash",       # Best price-performance (default) - mid-speed
+    "gemini-2.5-pro",
+    "gemini-3-pro-preview",   # Slowest but highest quality
 )
 DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
 
@@ -58,14 +58,19 @@ def _resolve_api_key(app: "App") -> str | None:
     return app.session_api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
 
 
-def _show_pending_partial(app: "App") -> None:
-    """Display queued partial result with stream delay for visible progress."""
-    app.partial_display_after_id = None
-    if app.pending_partial is not None:
-        app.output_txt.delete("1.0", tk.END)
-        app.output_txt.insert("1.0", app.pending_partial)
-        app.output_txt.see(tk.END)
-        app.pending_partial = None
+def _update_processing_indicator(app: "App") -> None:
+    """Update simple processing animation indicator."""
+    if not getattr(app, "expand_running", False):
+        return
+    # Cycle through animation frames
+    frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+    current = getattr(app, "_processing_frame", 0)
+    app._processing_frame = (current + 1) % len(frames)
+    # Update status with animation
+    base_status = getattr(app, "_base_status", "Processing…")
+    _status(app, f"{frames[app._processing_frame]} {base_status}")
+    # Schedule next frame
+    app.root.after(80, lambda: _update_processing_indicator(app))
 
 
 def _schedule_auto_learn(
@@ -73,17 +78,28 @@ def _schedule_auto_learn(
     xml_input: str,
     xml_output: str,
     examples_path: Path,
+    *,
+    model: str | None = None,
 ) -> None:
-    """Run auto-learn in a background thread when model is idle."""
+    """Run auto-learn in a background thread when model is idle.
+    Pro model results are weighted higher (preferred on merge, evicted last)."""
+    high_end = getattr(app, "_high_end_gpu", False)
+
     def learn() -> None:
         try:
+            from expand_diplomatic.examples_io import DEFAULT_MAX_LEARNED
+
             from expand_diplomatic.expander import extract_expansion_pairs
 
             pairs = extract_expansion_pairs(xml_input, xml_output)
             if not pairs:
                 return
             learned_path = get_learned_path(examples_path)
-            add_learned_pairs(pairs, learned_path)
+            add_learned_pairs(
+                pairs, learned_path,
+                max_learned=4000 if high_end else DEFAULT_MAX_LEARNED,
+                model=model,
+            )
         except Exception:
             pass  # Quiet: do not disturb user
 
@@ -114,12 +130,12 @@ def _expand_worker(
 
     def progress_cb(current: int, total: int, _msg: str) -> None:
         last_progress_time[0] = time.time()
-        s = f"Expanding… block {current}/{total}" if total > 0 else "Expanding…"
+        s = f"block {current}/{total}" if total > 0 else "Processing…"
         pct = int(100 * current / total) if total > 0 else 0
 
         def update_ui() -> None:
             app.last_progress_time = time.time()
-            _status(app, s)
+            app._base_status = s
             app.progress_bar["value"] = pct
             # Show elapsed time
             elapsed = int(time.time() - app.expand_start_time)
@@ -128,21 +144,26 @@ def _expand_worker(
         app.root.after(0, update_ui)
 
     def partial_cb(xml_result: str) -> None:
-        """Stream each block's result; pace updates for visible real-time progress."""
-        try:
-            delay = max(0, min(300, int(app.stream_delay_var.get().strip() or "0")))
-        except (ValueError, AttributeError):
-            delay = 0
-        app.pending_partial = xml_result
-        if app.partial_display_after_id is not None:
+        """Display each completed block without scrolling."""
+        def update_output() -> None:
+            # Save scroll position
             try:
-                app.root.after_cancel(app.partial_display_after_id)
+                scroll_pos = app.output_txt.yview()
             except Exception:
-                pass
-        if delay <= 0:
-            app.root.after(0, lambda: _show_pending_partial(app))
-        else:
-            app.partial_display_after_id = app.root.after(delay, lambda: _show_pending_partial(app))
+                scroll_pos = None
+            
+            # Update content
+            app.output_txt.delete("1.0", tk.END)
+            app.output_txt.insert("1.0", xml_result)
+            
+            # Restore scroll position (don't move page)
+            if scroll_pos is not None:
+                try:
+                    app.output_txt.yview_moveto(scroll_pos[0])
+                except Exception:
+                    pass
+        
+        app.root.after(0, update_output)
 
     result: str | None = None
     err: Exception | None = None
@@ -155,7 +176,7 @@ def _expand_worker(
             model=model,
             modality=modality,
             progress_callback=progress_cb,
-            partial_result_callback=partial_cb,
+            partial_result_callback=partial_cb,  # Show each completed block
             max_concurrent=max_concurrent,
             passes=passes,
             cancel_check=cancel_check,
@@ -165,14 +186,6 @@ def _expand_worker(
 
     def on_done() -> None:
         from run_gemini import format_api_error
-
-        if app.partial_display_after_id is not None:
-            try:
-                app.root.after_cancel(app.partial_display_after_id)
-            except Exception:
-                pass
-            app.partial_display_after_id = None
-        app.pending_partial = None
         app.expand_btn.config(state=tk.NORMAL)
         app.progress_bar["value"] = 0
         app.time_label_var.set("")
@@ -188,14 +201,28 @@ def _expand_worker(
             msg = format_api_error(err) if err else "Unknown error"
             _show_api_error_dialog(app, msg, xml, is_retry=True)
             return
+        # Save scroll position before updating
+        try:
+            scroll_pos = app.output_txt.yview()
+        except Exception:
+            scroll_pos = None
+        
         app.output_txt.delete("1.0", tk.END)
         app.output_txt.insert("1.0", result or "")
+        
+        # Restore scroll position (don't move page)
+        if scroll_pos is not None:
+            try:
+                app.output_txt.yview_moveto(scroll_pos[0])
+            except Exception:
+                pass
+        
         elapsed = int(time.time() - app.expand_start_time)
         _status(app, f"Done in {elapsed}s.")
         # Auto-learn: quietly train local model on Gemini results in background
         if backend == "gemini" and getattr(app, "auto_learn_var", None) and app.auto_learn_var.get():
             ex_path = Path(app.examples_var.get().strip() or str(DEFAULT_EXAMPLES))
-            _schedule_auto_learn(app, xml, result or "", ex_path)
+            _schedule_auto_learn(app, xml, result or "", ex_path, model=model)
 
     app.root.after(0, on_done)
 
@@ -326,8 +353,9 @@ def _show_api_error_dialog(
         "Expand failed",
         "Expand failed:\n\n%s\n\nRetry with same setup? (Examples will be reloaded from disk.)" % message,
     ):
-        app.backend_var.set(app.last_expand_backend)
         app.backend = app.last_expand_backend
+        app.backend_var.set(app.last_expand_backend)
+        app._on_backend_change(app.last_expand_backend)
         _focus_main(app)
         _run_expand_internal(
             app, xml,
@@ -341,6 +369,7 @@ def _show_api_error_dialog(
         app.session_api_key = key
         app.backend = "gemini"
         app.backend_var.set("gemini")
+        app._on_backend_change("gemini")
         _run_expand_internal(app, xml, key, "gemini", retry=True)
 
     win = tk.Toplevel(app.root)
@@ -366,6 +395,7 @@ def _show_api_error_dialog(
         _focus_main(app)
         app.backend = "local"
         app.backend_var.set("local")
+        app._on_backend_change("local")
         _run_expand_internal(app, xml, None, "local", retry=True)
 
     def use_online() -> None:
@@ -373,6 +403,7 @@ def _show_api_error_dialog(
         _focus_main(app)
         app.backend = "gemini"
         app.backend_var.set("gemini")
+        app._on_backend_change("gemini")
         key = _resolve_api_key(app)
         if key:
             _run_expand_internal(app, xml, key, "gemini", retry=True)
@@ -456,6 +487,10 @@ def _run_expand_internal(
     app.expand_run_id = getattr(app, "expand_run_id", 0) + 1
     app.progress_bar["value"] = 0
     app.cancel_btn.config(state=tk.NORMAL)
+    # Start processing animation
+    app._processing_frame = 0
+    app._base_status = "Starting…"
+    _update_processing_indicator(app)
     _start_hang_check(app)
     run_id = app.expand_run_id
     t = threading.Thread(
@@ -505,26 +540,37 @@ class App:
         self.modality_var = tk.StringVar(value="full")
         self.gemini_model_var = tk.StringVar(value=self.model_gemini)
         self.time_label_var = tk.StringVar(value="")
+        self.format_label_var = tk.StringVar(value="")  # PAGE or TEI format indicator
         # Progress/hang tracking
         self.progress_bar: ttk.Progressbar = None  # set in _build_status
         self.expand_start_time: float = 0.0
         self.last_progress_time: float = 0.0
         self.expand_running: bool = False
         self.hang_check_id: str | None = None
+        self._high_end_gpu = False
+        try:
+            from expand_diplomatic.gpu_detect import detect_high_end_gpu
+            self._high_end_gpu = detect_high_end_gpu()
+        except Exception:
+            pass
         self.auto_learn_var = tk.BooleanVar(value=True)
-        self.include_learned_var = tk.BooleanVar(value=False)
+        self.include_learned_var = tk.BooleanVar(value=self._high_end_gpu)
         self.autosave_var = tk.BooleanVar(value=True)
         self.autosave_after_id: str | None = None
         self.autosave_idle_ms = 3000
-        self.stream_delay_var = tk.StringVar(value="80")
-        self.pending_partial: str | None = None
-        self.partial_display_after_id: str | None = None
+        self._processing_frame = 0
+        self._base_status = ""
         self.image_path: Path | None = None
         self._image_photo: tk.PhotoImage | None = None
         self._image_panel_expanded = False
+        # Batch processing state
+        self._batch_files: list[Path] = []
+        self._batch_status: dict[str, str] = {}  # filename -> "pending"/"processing"/"done"/"failed"
+        self._batch_panel_expanded = False
 
         self._build_toolbar()
         self._build_main()
+        self._build_batch_panel()
         self._build_train()
         self._build_status()
 
@@ -542,6 +588,7 @@ class App:
             (tk.Button, "Open", self._on_open, {"width": 4}),
             (tk.Button, "Expand", self._on_expand, {"width": 5}),
             (tk.Button, "Re-expand", self._on_reexpand, {"width": 8}),
+            (tk.Button, "Batch…", self._on_batch, {"width": 6}),
             (tk.Button, "Save", self._on_save, {"width": 4}),
             (tk.Button, "◀", self._on_prev_file, {"width": 2}),
             (tk.Button, "▶", self._on_next_file, {"width": 2}),
@@ -572,10 +619,12 @@ class App:
         col += 1
         tk.OptionMenu(r2, self.modality_var, *MODALITIES).grid(row=0, column=col, sticky=tk.W, **pad)
         col += 1
-        tk.Label(r2, text="∥", **opts).grid(row=0, column=col, **pad)
+        tk.Label(r2, text="Simul.", **opts).grid(row=0, column=col, **pad)
         col += 1
+        _conc_max = 16 if self._high_end_gpu else 8
         self.concurrent_var = tk.StringVar(value="2")
-        tk.Spinbox(r2, from_=1, to=8, width=2, textvariable=self.concurrent_var).grid(row=0, column=col, sticky=tk.W, **pad)
+        self._concurrent_spinbox = tk.Spinbox(r2, from_=1, to=_conc_max, width=2, textvariable=self.concurrent_var)
+        self._concurrent_spinbox.grid(row=0, column=col, sticky=tk.W, **pad)
         col += 1
         tk.Label(r2, text="Pass", **opts).grid(row=0, column=col, **pad)
         col += 1
@@ -586,11 +635,7 @@ class App:
         col += 1
         tk.Checkbutton(r2, text="Layered Training", variable=self.include_learned_var, **opts).grid(row=0, column=col, sticky=tk.W, **pad)
         col += 1
-        tk.Checkbutton(r2, text="Auto", variable=self.autosave_var, **opts).grid(row=0, column=col, sticky=tk.W, **pad)
-        col += 1
-        tk.Label(r2, text="Stream", **opts).grid(row=0, column=col, **pad)
-        col += 1
-        tk.Spinbox(r2, from_=0, to=300, width=3, textvariable=self.stream_delay_var).grid(row=0, column=col, sticky=tk.W, **pad)
+        tk.Checkbutton(r2, text="Autosave", variable=self.autosave_var, **opts).grid(row=0, column=col, sticky=tk.W, **pad)
         col += 1
         tk.Label(r2, text="Examples", **opts).grid(row=0, column=col, sticky=tk.W, **pad)
         col += 1
@@ -611,13 +656,24 @@ class App:
         self._on_backend_change(self.backend_var.get())
 
     def _on_backend_change(self, backend: str) -> None:
-        """Show or hide Gemini model dropdown based on backend."""
+        """Show or hide Gemini model dropdown; when local+GPU, suggest higher Parallel."""
         if backend.strip().lower() == "local":
             self._model_label.grid_remove()
             self._model_menu.grid_remove()
+            if self._high_end_gpu and hasattr(self, "_concurrent_spinbox"):
+                self.concurrent_var.set("12")
+                self._concurrent_spinbox.configure(to=16)
         else:
             self._model_label.grid()
             self._model_menu.grid()
+            if hasattr(self, "_concurrent_spinbox"):
+                self._concurrent_spinbox.configure(to=8)
+                try:
+                    v = int(self.concurrent_var.get().strip() or "2")
+                    if v > 8:
+                        self.concurrent_var.set("8")
+                except ValueError:
+                    self.concurrent_var.set("2")
 
     def _build_main(self) -> None:
         panes = tk.Frame(self.root)
@@ -657,6 +713,82 @@ class App:
         self._image_canvas.bind("<Configure>", self._on_image_canvas_configure)
         self._image_panel.configure(width=280)
         self._image_panel.pack_propagate(True)
+
+    def _build_batch_panel(self) -> None:
+        """Build collapsible batch file list panel (hidden by default)."""
+        self._batch_frame = tk.LabelFrame(self.root, text="Batch Processing", font=("", 9))
+        # Header row with toggle and summary
+        header = tk.Frame(self._batch_frame, relief=tk.FLAT)
+        header.pack(fill=tk.X, padx=2, pady=2)
+        self._batch_toggle_btn = tk.Button(
+            header, text="▼ Files", width=8, anchor=tk.W,
+            command=self._toggle_batch_list, font=("", 8), relief=tk.RAISED,
+        )
+        self._batch_toggle_btn.pack(side=tk.LEFT, padx=2)
+        self._batch_summary_var = tk.StringVar(value="")
+        tk.Label(header, textvariable=self._batch_summary_var, font=("", 9), anchor=tk.W).pack(side=tk.LEFT, padx=4)
+        tk.Button(header, text="✕", width=2, command=self._hide_batch_panel, font=("", 8), relief=tk.FLAT).pack(side=tk.RIGHT, padx=2)
+        # File list (scrolled text, initially hidden)
+        self._batch_list_frame = tk.Frame(self._batch_frame, relief=tk.SUNKEN, bd=1)
+        self._batch_listbox = scrolledtext.ScrolledText(
+            self._batch_list_frame, height=6, wrap=tk.NONE, state=tk.DISABLED,
+            font=("Courier", 9), bg="#fafafa", relief=tk.FLAT,
+        )
+        self._batch_listbox.pack(fill=tk.BOTH, expand=True, padx=0, pady=0)
+        # Tags for status colors
+        self._batch_listbox.tag_configure("pending", foreground="#888")
+        self._batch_listbox.tag_configure("processing", foreground="#0066cc", background="#e6f0ff")
+        self._batch_listbox.tag_configure("done", foreground="#228B22")
+        self._batch_listbox.tag_configure("failed", foreground="#cc0000", background="#ffe6e6")
+        # Start collapsed
+        self._batch_list_expanded = False
+
+    def _toggle_batch_list(self) -> None:
+        """Toggle visibility of the batch file list."""
+        if self._batch_list_expanded:
+            self._batch_list_frame.pack_forget()
+            self._batch_toggle_btn.config(text="▶ Files")
+            self._batch_list_expanded = False
+        else:
+            self._batch_list_frame.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
+            self._batch_toggle_btn.config(text="▼ Files")
+            self._batch_list_expanded = True
+
+    def _show_batch_panel(self, files: list) -> None:
+        """Show and populate the batch panel with files."""
+        self._batch_files = files
+        self._batch_status = {f.name: "pending" for f in files}
+        self._update_batch_list()
+        self._batch_frame.pack(side=tk.TOP, fill=tk.X, padx=4, pady=2, before=self._train_frame)
+        # Auto-expand if there are files
+        if not self._batch_list_expanded:
+            self._toggle_batch_list()
+
+    def _hide_batch_panel(self) -> None:
+        """Hide the batch panel."""
+        self._batch_frame.pack_forget()
+        self._batch_files = []
+        self._batch_status = {}
+
+    def _update_batch_list(self) -> None:
+        """Refresh the batch file list with current status."""
+        self._batch_listbox.config(state=tk.NORMAL)
+        self._batch_listbox.delete("1.0", tk.END)
+        done = sum(1 for s in self._batch_status.values() if s == "done")
+        failed = sum(1 for s in self._batch_status.values() if s == "failed")
+        total = len(self._batch_files)
+        self._batch_summary_var.set(f"({done}/{total} done" + (f", {failed} failed)" if failed else ")"))
+        for f in self._batch_files:
+            status = self._batch_status.get(f.name, "pending")
+            icon = {"pending": "○", "processing": "◉", "done": "✓", "failed": "✗"}.get(status, "○")
+            line = f"{icon} {f.name}\n"
+            self._batch_listbox.insert(tk.END, line, status)
+        self._batch_listbox.config(state=tk.DISABLED)
+
+    def _update_batch_file_status(self, filename: str, status: str) -> None:
+        """Update status for a single file and refresh the list."""
+        self._batch_status[filename] = status
+        self.root.after(0, self._update_batch_list)
 
     def _toggle_image_panel(self) -> None:
         """Expand or collapse the image panel."""
@@ -757,6 +889,7 @@ class App:
     def _build_train(self) -> None:
         tr = tk.LabelFrame(self.root, text="Train (add examples)")
         tr.pack(side=tk.TOP, fill=tk.X, padx=4, pady=2)
+        self._train_frame = tr  # Reference for batch panel positioning
         row = tk.Frame(tr)
         row.pack(fill=tk.X, padx=2, pady=2)
         row.columnconfigure(1, weight=1)  # Diplomatic entry
@@ -784,23 +917,33 @@ class App:
         self._refresh_train_list()
 
     def _build_status(self) -> None:
-        status_frame = tk.Frame(self.root)
-        status_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=4, pady=2)
+        status_frame = tk.Frame(self.root, relief=tk.SUNKEN, bd=1)
+        status_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=2, pady=2)
         status_frame.columnconfigure(1, weight=1)
-        tk.Label(status_frame, textvariable=self.status_var, anchor=tk.W).grid(
-            row=0, column=0, sticky=tk.W, padx=(0, 8), pady=2
+        # Status message
+        tk.Label(status_frame, textvariable=self.status_var, anchor=tk.W, font=("", 9)).grid(
+            row=0, column=0, sticky=tk.W, padx=(4, 8), pady=2
         )
+        # Progress bar (expandable)
         self.progress_bar = ttk.Progressbar(
             status_frame, orient=tk.HORIZONTAL, mode="determinate"
         )
         self.progress_bar.grid(row=0, column=1, sticky=tk.EW, padx=4, pady=2)
-        tk.Label(status_frame, textvariable=self.time_label_var, width=6, anchor=tk.W).grid(
-            row=0, column=2, sticky=tk.W, padx=4, pady=2
+        # Elapsed time
+        tk.Label(status_frame, textvariable=self.time_label_var, width=5, anchor=tk.E, font=("", 9)).grid(
+            row=0, column=2, sticky=tk.E, padx=2, pady=2
         )
+        # Format indicator (PAGE/TEI) - plain text label
+        self._format_label = tk.Label(
+            status_frame, textvariable=self.format_label_var, width=4, anchor=tk.CENTER,
+            font=("", 9), fg="white"
+        )
+        self._format_label.grid(row=0, column=3, sticky=tk.W, padx=(4, 2), pady=2)
+        # Cancel button
         self.cancel_btn = tk.Button(
             status_frame, text="Cancel", command=self._on_cancel_expand, state=tk.DISABLED
         )
-        self.cancel_btn.grid(row=0, column=3, padx=4, pady=2)
+        self.cancel_btn.grid(row=0, column=4, padx=(2, 4), pady=2)
 
     def _get_block_ranges_cached(self, content: str) -> list[tuple[int, int]]:
         """Block ranges for content, cached to avoid re-parsing on repeated clicks."""
@@ -818,7 +961,7 @@ class App:
         return ranges
 
     def _on_panel_click(self, event: tk.Event) -> None:
-        """On click in input or output, select the parallel block in the other panel."""
+        """On click in input or output, select the parallel block in the other panel and align vertically."""
         widget = event.widget
         try:
             idx = widget.index(f"@{event.x},{event.y}")
@@ -850,7 +993,14 @@ class App:
         other.tag_remove("sel", "1.0", tk.END)
         other.tag_add("sel", start_idx, end_idx)
         other.mark_set("insert", start_idx)
-        other.see(start_idx)
+        # Scroll to align both blocks at same vertical position
+        try:
+            clicked_line = widget.index(f"@{event.x},{event.y}").split('.')[0]
+            widget.see(f"{clicked_line}.0")
+            other_line = start_idx.split('.')[0]
+            other.see(f"{other_line}.0")
+        except Exception:
+            other.see(start_idx)
 
     def _on_panel_double_click(self, event: tk.Event) -> None:
         """On double-click, snap selection to the entire block at clicked position in both panels."""
@@ -881,8 +1031,7 @@ class App:
         widget.tag_remove("sel", "1.0", tk.END)
         widget.tag_add("sel", start_idx, end_idx)
         widget.mark_set("insert", start_idx)
-        widget.see(start_idx)
-        # Sync selection to corresponding block in other panel
+        # Sync selection to corresponding block in other panel and align vertically
         other = self.output_txt if widget is self.input_txt else self.input_txt
         other_content = other.get("1.0", tk.END)
         other_ranges = self._get_block_ranges_cached(other_content)
@@ -893,7 +1042,15 @@ class App:
             other.tag_remove("sel", "1.0", tk.END)
             other.tag_add("sel", o_start_idx, o_end_idx)
             other.mark_set("insert", o_start_idx)
-            other.see(o_start_idx)
+            # Scroll both panels to align the blocks at same vertical position
+            try:
+                clicked_line = start_idx.split('.')[0]
+                widget.see(f"{clicked_line}.0")
+                other_line = o_start_idx.split('.')[0]
+                other.see(f"{other_line}.0")
+            except Exception:
+                widget.see(start_idx)
+                other.see(o_start_idx)
         return "break"  # Prevent default word selection
 
     def _file_dialog_dir(self) -> Path:
@@ -928,18 +1085,40 @@ class App:
             self.last_input_path = p
             self.folder_files = sorted(p.parent.glob("*.xml"))
             self.folder_index = next((i for i, f in enumerate(self.folder_files) if f.resolve() == p.resolve()), -1)
+            self._load_expanded_if_exists(p)
+            # Detect format and update status bar
+            from expand_diplomatic.expander import is_page_xml
+            fmt = "PAGE" if is_page_xml(text) else "TEI"
+            self.format_label_var.set(fmt)
             _status(self, f"Loaded {p.name}")
         except Exception as e:
             messagebox.showerror("Open failed", str(e))
 
     def _load_file(self, p: Path) -> None:
-        """Load XML from path into input."""
+        """Load XML from path into input; clear output unless expanded file exists."""
         text = p.read_text(encoding="utf-8")
         self.input_txt.delete("1.0", tk.END)
         self.input_txt.insert("1.0", text)
         self.original_input = text
         self.last_input_path = p
+        self._load_expanded_if_exists(p)
+        # Detect format and update status bar
+        from expand_diplomatic.expander import is_page_xml
+        fmt = "PAGE" if is_page_xml(text) else "TEI"
+        self.format_label_var.set(fmt)
         _status(self, f"Loaded {p.name}")
+
+    def _load_expanded_if_exists(self, input_path: Path) -> None:
+        """Clear output panel; if <stem>_expanded.xml exists, load it."""
+        self.output_txt.delete("1.0", tk.END)
+        expanded_path = input_path.parent / f"{input_path.stem}_expanded.xml"
+        if expanded_path.exists():
+            try:
+                text = expanded_path.read_text(encoding="utf-8")
+                self.output_txt.insert("1.0", text)
+                self.output_txt.see("1.0")
+            except Exception:
+                pass
 
     def _on_prev_file(self) -> None:
         """Load previous XML file in folder. Left arrow."""
@@ -993,6 +1172,166 @@ class App:
             _show_api_error_dialog(self, "No API key set.", xml, is_retry=False)
             return
         _run_expand_internal(self, xml, api_key, backend, retry=False)
+
+    def _on_batch(self) -> None:
+        """Open folder dialog and batch-expand all XML files in parallel."""
+        # Validate API key for Gemini backend before folder selection
+        backend = (self.backend_var.get() or "gemini").strip() or "gemini"
+        api_key = _resolve_api_key(self)
+        if backend == "gemini" and not api_key:
+            messagebox.showerror(
+                "No API key",
+                "Gemini backend requires an API key.\n\n"
+                "Set GEMINI_API_KEY in .env, or switch to Local backend.",
+            )
+            return
+
+        folder = filedialog.askdirectory(
+            title="Select folder with XML files",
+            initialdir=str(self._file_dialog_dir()),
+        )
+        if not folder:
+            return
+        folder_path = Path(folder)
+        files = sorted(folder_path.glob("*.xml"))
+        files = [f for f in files if not f.stem.endswith("_expanded")]
+        if not files:
+            messagebox.showinfo("Batch", "No XML files found (excluding *_expanded.xml).")
+            return
+
+        # Ask for confirmation and parallel count
+        try:
+            parallel = int(self.concurrent_var.get().strip() or "2")
+            parallel = max(1, min(8, parallel))
+        except ValueError:
+            parallel = 2
+
+        # Show file list in confirmation
+        file_list_preview = "\n".join(f"  • {f.name}" for f in files[:10])
+        if len(files) > 10:
+            file_list_preview += f"\n  … and {len(files) - 10} more"
+
+        if not messagebox.askyesno(
+            "Batch expand",
+            f"Expand {len(files)} files in '{folder_path.name}'?\n\n"
+            f"Files:\n{file_list_preview}\n\n"
+            f"Parallel files: {parallel}\n"
+            f"Backend: {backend}\n"
+            f"Modality: {self.modality_var.get()}\n\n"
+            "Output: <filename>_expanded.xml in same folder",
+        ):
+            return
+
+        # Show batch panel and run
+        self._show_batch_panel(files)
+        self._run_batch(files, parallel)
+
+    def _run_batch(self, files: list, parallel: int) -> None:
+        """Run batch expansion in background with file status tracking."""
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        backend = (self.backend_var.get() or "gemini").strip() or "gemini"
+        api_key = _resolve_api_key(self)
+        modality = self.modality_var.get().strip() or "full"
+        model = self.gemini_model_var.get() if backend == "gemini" else "llama3.2"
+
+        examples_path = Path(self.examples_var.get().strip() or str(DEFAULT_EXAMPLES))
+        include_learned = bool(getattr(self, "include_learned_var", None) and self.include_learned_var.get())
+        try:
+            examples = load_examples(examples_path, include_learned=include_learned)
+        except ValueError as e:
+            messagebox.showerror("Examples", str(e))
+            self._hide_batch_panel()
+            return
+
+        total = len(files)
+        completed = [0]
+        failed = []
+        cancelled = [False]
+
+        def expand_one(f: Path) -> tuple[Path, bool, str]:
+            # Mark as processing
+            self.root.after(0, lambda: self._update_batch_file_status(f.name, "processing"))
+            try:
+                from expand_diplomatic.expander import expand_xml
+                xml = f.read_text(encoding="utf-8")
+                out_path = f.parent / f"{f.stem}_expanded.xml"
+                result = expand_xml(
+                    xml, examples,
+                    model=model,
+                    api_key=api_key,
+                    backend=backend,
+                    modality=modality,
+                )
+                out_path.write_text(result, encoding="utf-8")
+                return (f, True, f.name)
+            except Exception as e:
+                return (f, False, f"{f.name}: {e}")
+
+        def run_batch() -> None:
+            nonlocal completed, failed, cancelled
+            self.expand_running = True
+            self.cancel_requested = False
+            self.cancel_btn.config(state=tk.NORMAL)
+
+            def on_done():
+                self.expand_running = False
+                self.cancel_btn.config(state=tk.DISABLED)
+                self.progress_bar["value"] = 0
+                # Final update to batch list
+                self._update_batch_list()
+                if cancelled[0]:
+                    _status(self, f"Batch cancelled ({completed[0]}/{total} done)")
+                    messagebox.showinfo("Batch cancelled", f"Stopped after {completed[0]} files.")
+                elif failed:
+                    _status(self, f"Batch done: {total - len(failed)}/{total} OK, {len(failed)} failed")
+                    messagebox.showwarning("Batch complete", f"{len(failed)} files failed:\n\n" + "\n".join(failed[:10]))
+                else:
+                    _status(self, f"Batch done: {total} files expanded")
+                    messagebox.showinfo("Batch complete", f"All {total} files expanded successfully.")
+                # Auto-hide batch panel after 5 seconds if successful
+                if not failed and not cancelled[0]:
+                    self.root.after(5000, self._hide_batch_panel)
+
+            try:
+                with ThreadPoolExecutor(max_workers=parallel) as executor:
+                    future_to_file = {executor.submit(expand_one, f): f for f in files}
+                    for future in as_completed(future_to_file):
+                        if getattr(self, "cancel_requested", False):
+                            cancelled[0] = True
+                            # Mark remaining as pending (not processed)
+                            for fut, fpath in future_to_file.items():
+                                if not fut.done():
+                                    fut.cancel()
+                            break
+                        try:
+                            f_path, ok, msg = future.result()
+                        except Exception as e:
+                            f_path = future_to_file[future]
+                            ok, msg = False, str(e)
+                        completed[0] += 1
+                        # Update file status
+                        status = "done" if ok else "failed"
+                        self.root.after(0, lambda fn=f_path.name, s=status: self._update_batch_file_status(fn, s))
+                        if not ok:
+                            failed.append(msg)
+
+                        def update_progress(c=completed[0], t=total, m=msg, o=ok):
+                            pct = int(100 * c / t)
+                            self.progress_bar["value"] = pct
+                            status_msg = f"Batch: {c}/{t}"
+                            if not o:
+                                status_msg += f" (failed: {m[:30]})"
+                            _status(self, status_msg)
+
+                        self.root.after(0, update_progress)
+            finally:
+                self.root.after(0, on_done)
+
+        _status(self, f"Batch: 0/{total}")
+        self.progress_bar["value"] = 0
+        t = threading.Thread(target=run_batch, daemon=True)
+        t.start()
 
     def _on_cancel_expand(self) -> None:
         """Cancel the current expansion (signals worker to stop, resets UI)."""

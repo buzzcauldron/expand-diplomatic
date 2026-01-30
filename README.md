@@ -96,7 +96,7 @@ python gui.py
 
 - **Backend** – Use **Gemini** (online, needs API key) or **Local** (no key, uses rules or Ollama).
 - **Model** – Which Gemini model to use (hidden when Backend is Local). Default is a good balance of speed and cost.
-- **Modality** – Expansion style: full, conservative, normalize, aggressive, or **local** (tuned for non-Gemini models like Ollama; not the default).
+- **Modality** – How much to expand manuscript transcriptions: conservative, normalize, full, aggressive, or **local** (tuned for non-Gemini models like Ollama; not the default).
 - **Parallel** – How many blocks to process at once. Lower this (e.g. 1) if you see rate limit errors.
 - **Learn** – When on, the app saves new abbreviation pairs from each expansion to improve future runs.
 - **Layered Training** – When on, includes learned examples in the expansion prompt (curated + learned).
@@ -158,6 +158,11 @@ For many files:
 python -m expand_diplomatic --batch-dir ./my_xml_folder --out-dir ./expanded
 ```
 
+For parallel processing of multiple files (faster):
+```bash
+python -m expand_diplomatic --batch-dir ./my_xml_folder --parallel-files 4
+```
+
 Use the local backend (no API key):
 ```bash
 python -m expand_diplomatic --backend local --file document.xml
@@ -167,16 +172,20 @@ python -m expand_diplomatic --backend local --file document.xml
 
 ## File types and format
 
-- **Input:** XML files (e.g. TEI, PAGE XML).
-- **Output:** Same structure, with only the text inside elements changed.
-- **Blocks:** Paragraphs, lines, and similar elements (e.g. `p`, `l`, `Unicode` in PAGE) are expanded. Structure and attributes stay the same.
+- **Input:** XML files (TEI or PAGE XML).
+- **Output:** Same structure and format, with only the text inside elements changed.
+- **Blocks:** Paragraphs, lines, and similar elements (e.g. `p`, `l`, `Unicode` in PAGE) are expanded. Structure, namespaces, and attributes stay the same.
+- **Pairing:** Input `file.xml` → Output `file_expanded.xml`. When you open a file, if `file_expanded.xml` exists in the same folder, it's loaded into the output panel.
+- **Batch mode:** Files ending in `_expanded.xml` are skipped to avoid re-expanding.
+- **Parallel files:** Use `Batch…` button (GUI) or `--parallel-files N` (CLI) to process multiple files simultaneously.
+- **Format detection:** The status bar shows whether the loaded file is PAGE or TEI format.
 
 ---
 
 ## Advanced options
 
 - **Container (Docker):** See the Container section below if you prefer to run in Docker.
-- **Modality:** `full` (default), `conservative`, `normalize`, `aggressive` — control how much the text is modernized.
+- **Modality:** `full` (default), `conservative`, `normalize`, `aggressive` — control how much abbreviations/superscripts are expanded while staying faithful to the manuscript.
 - **Environment variables:**  
   `GEMINI_MODEL`, `GEMINI_TIMEOUT`, `EXPANDER_MAX_CONCURRENT` and others can be set in `.env` or your system environment. See `.env.example` for details.
 
@@ -207,6 +216,50 @@ You need [Docker](https://docs.docker.com/get-docker/) installed and running.
 
 ---
 
+## Distribution packages
+
+Build native packages for different platforms:
+
+### Python packages (wheel + source)
+```bash
+./scripts/build-packages.sh
+# Output: dist/*.whl and dist/*.tar.gz
+# Install: pip install dist/expand_diplomatic-*.whl
+```
+
+### RPM (Red Hat, Fedora, CentOS, Rocky Linux)
+```bash
+./scripts/build-rpm.sh
+# Requires: rpm-build, python3-devel
+# Output: rpmbuild/RPMS/noarch/*.rpm
+# Install: sudo dnf install rpmbuild/RPMS/noarch/expand-diplomatic-*.rpm
+```
+
+### DEB (Debian, Ubuntu)
+```bash
+./scripts/build-deb.sh
+# Requires: dpkg-dev
+# Output: dist/*.deb
+# Install: sudo apt install ./dist/expand-diplomatic_*.deb
+```
+
+### macOS Application Bundle
+```bash
+./scripts/build-macos-app.sh
+# macOS only; optionally uses py2app if installed
+# Output: dist/Expand-Diplomatic.app
+# Install: cp -r dist/Expand-Diplomatic.app /Applications/
+```
+
+### Build all formats
+```bash
+./scripts/build-all.sh
+# Builds everything available for your platform
+# Or specify: ./scripts/build-all.sh --rpm --deb --app --docker
+```
+
+---
+
 ## Troubleshooting
 
 | Problem | What to try |
@@ -226,7 +279,7 @@ Useful flags when running from the command line:
 
 - `--examples PATH` — Use a different examples file
 - `--model ID` — Change Gemini model (e.g. `gemini-2.5-pro`)
-- `--modality {full,conservative,normalize,aggressive,local}` — Expansion style (`local` is tuned for non-Gemini models)
+- `--modality {full,conservative,normalize,aggressive,local}` — Manuscript expansion mode (`local` is tuned for non-Gemini models)
 - `--passes N` — Run expansion multiple times (1–5)
 - `--files-api` — Upload the full file to Gemini for extra context
 
