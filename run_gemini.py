@@ -28,6 +28,11 @@ _429_EXTRA_RETRIES = 2
 
 from dotenv import load_dotenv
 from google import genai
+
+try:
+    from expand_diplomatic.gemini_models import DEFAULT_MODEL as _DEFAULT_GEMINI
+except ImportError:
+    _DEFAULT_GEMINI = "gemini-3-flash-preview"
 from google.genai import types
 
 try:
@@ -163,7 +168,7 @@ def _do_run_gemini(
 
 def run_gemini(
     contents: str,
-    model: str = "gemini-2.5-flash",
+    model: str | None = None,
     api_key: Optional[str] = None,
     *,
     system_instruction: Optional[str] = None,
@@ -184,6 +189,8 @@ def run_gemini(
     timeout: seconds to wait per request (default: GEMINI_TIMEOUT env or 120).
       If the request takes longer, raises TimeoutError.
     """
+    if model is None:
+        model = _DEFAULT_GEMINI
     key = _get_api_key(api_key)
     t = timeout if timeout is not None else _get_timeout_seconds()
     retries = _get_retry_attempts()
@@ -317,7 +324,7 @@ def test_gemini_connection(
         )
 
     try:
-        run_gemini("Reply with exactly: OK", model="gemini-2.5-flash", api_key=key, timeout=timeout)
+        run_gemini("Reply with exactly: OK", model=_DEFAULT_GEMINI, api_key=key, timeout=timeout)
         return (True, "Connection OK. Gemini responded successfully.")
     except TimeoutError:
         return (
@@ -356,7 +363,7 @@ def test_gemini_connection(
 def _main() -> None:
     ap = argparse.ArgumentParser(description="Call Gemini API for text generation.")
     ap.add_argument("--prompt", "-p", required=True, help="Input prompt")
-    ap.add_argument("--model", "-m", default="gemini-2.5-flash", help="Gemini model")
+    ap.add_argument("--model", "-m", default=None, help=f"Gemini model (default: {_DEFAULT_GEMINI})")
     ap.add_argument("--temperature", "-t", type=float, default=0.2, help="Temperature")
     ap.add_argument("--file", "-f", type=Path, help="Upload file via Files API and send with prompt")
     ap.add_argument("--timeout", type=float, default=None, help="Request timeout seconds (default: GEMINI_TIMEOUT or 120)")
