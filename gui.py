@@ -406,7 +406,7 @@ def _run_expand_internal(
     retry: bool = False,
 ) -> None:
     # Always reload examples from disk (retrain) so Train additions are used on retry.
-    # "Use learned": include learned_examples.json in the prompt when checked (any backend).
+    # "Layered Training": include learned_examples.json in the prompt when checked (any backend).
     examples_path = Path(app.examples_var.get().strip() or str(DEFAULT_EXAMPLES))
     include_learned = bool(getattr(app, "include_learned_var", None) and app.include_learned_var.get())
     try:
@@ -584,7 +584,7 @@ class App:
         col += 1
         tk.Checkbutton(r2, text="Learn", variable=self.auto_learn_var, **opts).grid(row=0, column=col, sticky=tk.W, **pad)
         col += 1
-        tk.Checkbutton(r2, text="Learned", variable=self.include_learned_var, **opts).grid(row=0, column=col, sticky=tk.W, **pad)
+        tk.Checkbutton(r2, text="Layered Training", variable=self.include_learned_var, **opts).grid(row=0, column=col, sticky=tk.W, **pad)
         col += 1
         tk.Checkbutton(r2, text="Auto", variable=self.autosave_var, **opts).grid(row=0, column=col, sticky=tk.W, **pad)
         col += 1
@@ -802,6 +802,21 @@ class App:
         )
         self.cancel_btn.grid(row=0, column=3, padx=4, pady=2)
 
+    def _get_block_ranges_cached(self, content: str) -> list[tuple[int, int]]:
+        """Block ranges for content, cached to avoid re-parsing on repeated clicks."""
+        cache = getattr(self, "_block_ranges_cache", None)
+        if cache is None:
+            self._block_ranges_cache = {}
+            cache = self._block_ranges_cache
+        if content in cache:
+            return cache[content]
+        from expand_diplomatic.expander import get_block_ranges
+        ranges = get_block_ranges(content)
+        if len(cache) >= 4:  # Keep input+output for both panels
+            cache.clear()
+        cache[content] = ranges
+        return ranges
+
     def _on_panel_click(self, event: tk.Event) -> None:
         """On click in input or output, select the parallel block in the other panel."""
         widget = event.widget
@@ -816,8 +831,7 @@ class App:
             char_offset = widget.count("1.0", idx, "chars")[0]
         except Exception:
             return
-        from expand_diplomatic.expander import get_block_ranges
-        ranges = get_block_ranges(content)
+        ranges = self._get_block_ranges_cached(content)
         block_idx = None
         for i, (start, end) in enumerate(ranges):
             if start <= char_offset < end:
@@ -827,7 +841,7 @@ class App:
             return
         other = self.output_txt if widget is self.input_txt else self.input_txt
         other_content = other.get("1.0", tk.END)
-        other_ranges = get_block_ranges(other_content)
+        other_ranges = self._get_block_ranges_cached(other_content)
         if block_idx >= len(other_ranges):
             return
         start, end = other_ranges[block_idx]
@@ -852,8 +866,7 @@ class App:
             char_offset = widget.count("1.0", idx, "chars")[0]
         except Exception:
             return
-        from expand_diplomatic.expander import get_block_ranges
-        ranges = get_block_ranges(content)
+        ranges = self._get_block_ranges_cached(content)
         block_idx = None
         for i, (start, end) in enumerate(ranges):
             if start <= char_offset < end:
@@ -872,7 +885,7 @@ class App:
         # Sync selection to corresponding block in other panel
         other = self.output_txt if widget is self.input_txt else self.input_txt
         other_content = other.get("1.0", tk.END)
-        other_ranges = get_block_ranges(other_content)
+        other_ranges = self._get_block_ranges_cached(other_content)
         if block_idx < len(other_ranges):
             o_start, o_end = other_ranges[block_idx]
             o_start_idx = other.index(f"1.0 + {o_start} chars")

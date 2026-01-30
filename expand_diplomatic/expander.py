@@ -241,6 +241,7 @@ def _expand_text_block(
     client: Any = None,
     uploaded_file: Any = None,
     prompt_prefix: str | None = None,
+    sorted_pairs: list[tuple[str, str]] | None = None,
 ) -> str:
     if not text or not text.strip():
         return text
@@ -248,7 +249,7 @@ def _expand_text_block(
     if backend == "local":
         from .local_llm import run_local
 
-        return run_local(text, examples, prompt, model=model)
+        return run_local(text, examples, prompt, model=model, sorted_pairs=sorted_pairs)
     from run_gemini import run_gemini
 
     system = MODALITY_SYSTEM.get(modality) or MODALITY_SYSTEM["full"]
@@ -392,12 +393,19 @@ def _expand_once(
         max_concurrent = 1
     # Prebuild prompt prefix: Gemini uses examples-only + system_instruction; local uses combined.
     prompt_prefix: str | None = None
+    sorted_pairs: list[tuple[str, str]] | None = None
     if not dry_run and total > 0:
         prompt_prefix = (
             _build_prompt_prefix_examples_only(examples)
             if backend == "gemini"
             else _build_prompt_prefix(examples, modality)
         )
+        if backend == "local" and examples:
+            sorted_pairs = sorted(
+                [(ex["diplomatic"], ex["full"]) for ex in examples],
+                key=lambda p: len(p[0]),
+                reverse=True,
+            )
 
     def expand_one(args: tuple[int, Any, str]) -> tuple[int, Any, str]:
         i, el, raw = args
@@ -414,6 +422,7 @@ def _expand_once(
                 client=client,
                 uploaded_file=uploaded_file,
                 prompt_prefix=prompt_prefix,
+                sorted_pairs=sorted_pairs,
             )
         return (i, el, expanded)
 

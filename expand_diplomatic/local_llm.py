@@ -18,21 +18,29 @@ def _ollama_timeout() -> int:
     return 120
 
 
-def run_local_rules(text: str, examples: list[dict[str, str]]) -> str:
+def run_local_rules(
+    text: str,
+    examples: list[dict[str, str]] | None = None,
+    *,
+    sorted_pairs: list[tuple[str, str]] | None = None,
+) -> str:
     """
     Expand using training examples only: replace each diplomatic→full in text.
     Longest matches first to avoid overlapping substitutions. No Ollama or API.
+    Pass sorted_pairs to skip per-call sort when same examples used for many blocks.
     """
     if not text or not text.strip():
         return text
-    if not examples:
+    if sorted_pairs is not None:
+        pairs = sorted_pairs
+    elif examples:
+        pairs = sorted(
+            [(ex["diplomatic"], ex["full"]) for ex in examples],
+            key=lambda p: len(p[0]),
+            reverse=True,
+        )
+    else:
         return text
-    # Sort by len(diplomatic) descending to match longer strings first
-    pairs = sorted(
-        [(ex["diplomatic"], ex["full"]) for ex in examples],
-        key=lambda p: len(p[0]),
-        reverse=True,
-    )
     out = text
     for d, f in pairs:
         if not d:
@@ -87,12 +95,15 @@ def run_local(
     prompt: str,
     model: str = "llama3.2",
     base_url: str = "http://localhost:11434",
+    *,
+    sorted_pairs: list[tuple[str, str]] | None = None,
 ) -> str:
     """
     Try Ollama first; if unreachable, fall back to rule-based expansion using examples.
     Always succeeds when examples are available.
+    sorted_pairs: optional pre-sorted (dip, full) to avoid per-block sort.
     """
     try:
         return run_ollama(prompt, model=model, base_url=base_url)
     except RuntimeError:
-        return run_local_rules(text, examples)
+        return run_local_rules(text, examples=examples, sorted_pairs=sorted_pairs)
