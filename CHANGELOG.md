@@ -35,6 +35,7 @@ The project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 - Gemini models now fetched from API at startup; hardcoded list serves as fallback
 - Build system: `build-all.sh` now supports `--msi` flag for Windows installer builds
 - Default Gemini model: `gemini-3-flash-preview`; single source `gemini_models.DEFAULT_MODEL` (no hardcoded gemini-2.5-flash)
+- Whole-document expansion: default one API call per document (max_output_tokens 40000); `--block-by-block` or uncheck "Whole doc" for per-block mode
 
 ## [0.2.0] - 2026-01-30
 

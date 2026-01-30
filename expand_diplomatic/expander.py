@@ -164,6 +164,11 @@ def extract_text_lines(xml_source: str, block_tags: set[str] | None = None) -> s
 
 MODALITIES = ("full", "conservative", "normalize", "aggressive", "local")
 _LATIN = " Keep the expanded form in Latin. Do not translate to English or any other language."
+_WHOLE_DOC_OUTPUT = (
+    " Return the complete XML document with diplomatic transcriptions expanded. "
+    "Preserve all tags, attributes, namespaces, and structure exactly. "
+    "Only change the text content inside elements. Output only the XML, no commentary or markdown."
+)
 MODALITY_SYSTEM: dict[str, str] = {
     "conservative": (
         "Expand manuscript diplomatic transcriptions accurately. "
@@ -223,6 +228,56 @@ def _build_prompt_prefix_examples_only(examples: list[dict[str, str]]) -> str:
 
 def _build_prompt(examples: list[dict[str, str]], text: str, modality: str = "full") -> str:
     return _build_prompt_prefix(examples, modality) + text + "\nFull:"
+
+
+def _whole_doc_system(modality: str) -> str:
+    """System instruction for whole-document expansion: modality + XML output instructions."""
+    base = MODALITY_SYSTEM.get(modality) or MODALITY_SYSTEM["full"]
+    # Replace "Output only the expanded text" with whole-doc instruction
+    base = base.replace(" Output only the expanded text, no XML, no commentary.", "")
+    return base + _WHOLE_DOC_OUTPUT
+
+
+def _expand_whole_document(
+    xml_source: str,
+    examples: list[dict[str, str]],
+    model: str,
+    api_key: str | None,
+    modality: str = "full",
+    *,
+    input_file_path: Path | None = None,
+    client: Any = None,
+    uploaded_file: Any = None,
+) -> str:
+    """Expand entire XML document in one Gemini call."""
+    from run_gemini import run_gemini
+
+    examples_part = _format_examples_for_prompt(examples)
+    user_msg = (
+        f"{examples_part}\n"
+        "Expand all diplomatic transcriptions in the following XML document.\n"
+        "Return the complete XML with only the text content inside elements changed.\n\n"
+        f"{xml_source}"
+    )
+    system = _whole_doc_system(modality)
+    result = run_gemini(
+        user_msg,
+        model=model,
+        api_key=api_key,
+        system_instruction=system,
+        temperature=0.2,
+        client=client,
+        uploaded_file=uploaded_file,
+    )
+    # Strip markdown code blocks if present
+    s = result.strip()
+    if s.startswith("```xml"):
+        s = s[6:]
+    elif s.startswith("```"):
+        s = s[3:]
+    if s.endswith("```"):
+        s = s[:-3]
+    return s.strip()
 
 
 def _inner_text(el: etree._Element) -> str:
@@ -312,6 +367,7 @@ def expand_xml(
     max_concurrent: int | None = None,
     passes: int = 1,
     cancel_check: Callable[[], bool] | None = None,
+    whole_document: bool = True,
 ) -> str:
     """
     Parse XML, expand text inside block elements via LLM, return modified XML string.
@@ -330,19 +386,17 @@ def expand_xml(
     - max_concurrent: max parallel blocks (default from EXPANDER_MAX_CONCURRENT env or 2 gemini / 6 local).
     - passes: number of expansion passes (default 1). When > 1, re-expands output to refine further.
     - cancel_check: optional () -> bool; if returns True, expansion stops and raises ExpandCancelled.
+    - whole_document: when True and backend=gemini, expand entire document in one API call (default True).
     """
     if model is None:
         model = _DEFAULT_GEMINI
     passes = max(1, min(5, passes))
     current = xml_source
     for pass_num in range(passes):
-        def _wrap_progress(cb, p: int, total_p: int):
-            if cb is None:
-                return None
-            def wrapped(cur: int, tot: int, msg: str) -> None:
-                cb(cur, tot, f"Pass {p + 1}/{total_p}: {msg}" if total_p > 1 else msg)
-            return wrapped
-        pcb = _wrap_progress(progress_callback, pass_num, passes)
+        if cancel_check is not None and cancel_check():
+            raise ExpandCancelled("Expansion cancelled by user.")
+        if progress_callback is not None:
+            progress_callback(1, 1, f"Pass {pass_num + 1}/{passes}" if passes > 1 else "Expanding…")
         current = _expand_once(
             current,
             examples,
@@ -353,11 +407,14 @@ def expand_xml(
             dry_run=dry_run,
             backend=backend,
             modality=modality,
-            progress_callback=pcb,
+            progress_callback=progress_callback,
             partial_result_callback=partial_result_callback,
             max_concurrent=max_concurrent,
             cancel_check=cancel_check,
+            whole_document=whole_document,
         )
+        if whole_document and partial_result_callback is not None:
+            partial_result_callback(current)
     return current
 
 
@@ -376,10 +433,34 @@ def _expand_once(
     partial_result_callback: Callable[[str], None] | None = None,
     max_concurrent: int | None = None,
     cancel_check: Callable[[], bool] | None = None,
+    whole_document: bool = True,
 ) -> str:
     """Single expansion pass. Used internally by expand_xml for recursive correction."""
     if model is None:
         model = _DEFAULT_GEMINI
+
+    if whole_document and backend == "gemini" and not dry_run:
+        client: Any = None
+        uploaded_file: Any = None
+        if input_file_path is not None and input_file_path.exists():
+            from run_gemini import prepare_file_session
+            client, uploaded_file = prepare_file_session(input_file_path, api_key)
+        try:
+            return _expand_whole_document(
+                xml_source,
+                examples,
+                model=model,
+                api_key=api_key,
+                modality=modality,
+                input_file_path=input_file_path,
+                client=client,
+                uploaded_file=uploaded_file,
+            )
+        finally:
+            if client is not None and uploaded_file is not None:
+                from run_gemini import close_file_session
+                close_file_session(client, uploaded_file, delete=True)
+
     tags = block_tags or TEXT_BLOCK_TAGS
     root = etree.fromstring(xml_source.encode("utf-8"), etree.XMLParser(recover=True, remove_blank_text=False))
 

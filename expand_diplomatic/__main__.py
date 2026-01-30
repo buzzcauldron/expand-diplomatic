@@ -54,6 +54,7 @@ def _run_one(
     dry_run: bool = False,
     max_concurrent: int | None = None,
     passes: int = 1,
+    whole_document: bool = True,
 ) -> None:
     from .expander import expand_xml
 
@@ -69,6 +70,7 @@ def _run_one(
         modality=modality,
         max_concurrent=max_concurrent,
         passes=passes,
+        whole_document=whole_document,
     )
     if out_path is not None:
         out_path.write_text(result, encoding="utf-8")
@@ -178,6 +180,7 @@ def _run_expand(args: argparse.Namespace) -> None:
         mc = None
     passes = getattr(args, "passes", 1) or 1
     passes = max(1, min(5, passes))
+    whole_document = not getattr(args, "block_by_block", False)
 
     def run(text: str, out: Path | None, *, fpath: Path | None = None, files_api: bool = False) -> None:
         _run_one(
@@ -193,6 +196,7 @@ def _run_expand(args: argparse.Namespace) -> None:
             dry_run=dry_run,
             max_concurrent=mc,
             passes=passes,
+            whole_document=whole_document,
         )
 
     if args.text is not None:
@@ -380,6 +384,11 @@ def main() -> None:
         "--dry-run",
         action="store_true",
         help="Skip LLM; leave block text unchanged (pipeline test only)",
+    )
+    ap.add_argument(
+        "--block-by-block",
+        action="store_true",
+        help="Expand each block separately (default: whole document in one call)",
     )
     ap.add_argument("--version", "-V", action="version", version=__import__("expand_diplomatic._version", fromlist=["__version__"]).__version__)
     args = ap.parse_args(expand_argv)

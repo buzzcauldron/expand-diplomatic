@@ -172,10 +172,11 @@ def _expand_worker(
             model=model,
             modality=modality,
             progress_callback=progress_cb,
-            partial_result_callback=partial_cb,  # Show each completed block
+            partial_result_callback=partial_cb,
             max_concurrent=max_concurrent,
             passes=passes,
             cancel_check=cancel_check,
+            whole_document=app.whole_document_var.get() if getattr(app, "whole_document_var", None) else True,
         )
     except Exception as e:
         err = e
@@ -561,6 +562,7 @@ class App:
             pass
         self.auto_learn_var = tk.BooleanVar(value=True)
         self.include_learned_var = tk.BooleanVar(value=self._high_end_gpu)
+        self.whole_document_var = tk.BooleanVar(value=True)
         self.autosave_var = tk.BooleanVar(value=True)
         self.autosave_after_id: str | None = None
         self.autosave_idle_ms = 3000
@@ -642,6 +644,8 @@ class App:
         col += 1
         self.passes_var = tk.StringVar(value="1")
         tk.Spinbox(r2, from_=1, to=5, width=2, textvariable=self.passes_var).grid(row=0, column=col, sticky=tk.W, **pad)
+        col += 1
+        tk.Checkbutton(r2, text="Whole doc", variable=self.whole_document_var, **opts).grid(row=0, column=col, sticky=tk.W, **pad)
         col += 1
         tk.Checkbutton(r2, text="Learn", variable=self.auto_learn_var, **opts).grid(row=0, column=col, sticky=tk.W, **pad)
         col += 1
@@ -1427,6 +1431,7 @@ class App:
                     api_key=api_key,
                     backend=backend,
                     modality=modality,
+                    whole_document=self.whole_document_var.get() if getattr(self, "whole_document_var", None) else True,
                 )
                 out_path.write_text(result, encoding="utf-8")
                 return (f, True, f.name)
