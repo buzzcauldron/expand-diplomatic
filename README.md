@@ -95,9 +95,9 @@ python gui.py
 ### Settings
 
 - **Backend** – Use **Gemini** (online, needs API key) or **Local** (no key, uses rules or Ollama).
-- **Model** – Which Gemini model to use (hidden when Backend is Local). Default is a good balance of speed and cost.
+- **Model** – Which Gemini model to use (hidden when Backend is Local). Default is a good balance of speed and cost. Click **⟳** to refresh the available models from the API.
 - **Modality** – How much to expand manuscript transcriptions: conservative, normalize, full, aggressive, or **local** (tuned for non-Gemini models like Ollama; not the default).
-- **Parallel** – How many blocks to process at once. Lower this (e.g. 1) if you see rate limit errors.
+- **Simul.** – How many blocks to process at once. Lower this (e.g. 1) if you see rate limit errors.
 - **Learn** – When on, the app saves new abbreviation pairs from each expansion to improve future runs.
 - **Layered Training** – When on, includes learned examples in the expansion prompt (curated + learned).
 
@@ -227,6 +227,14 @@ Build native packages for different platforms:
 # Install: pip install dist/expand_diplomatic-*.whl
 ```
 
+### Windows MSI installer
+```bash
+./scripts/build-windows-msi.sh
+# Requires: Python with cx_Freeze on Windows or WSL2
+# Output: dist/*.msi
+# Install: Double-click the MSI file or run: msiexec /i <filename>.msi
+```
+
 ### RPM (Red Hat, Fedora, CentOS, Rocky Linux)
 ```bash
 ./scripts/build-rpm.sh
@@ -255,7 +263,7 @@ Build native packages for different platforms:
 ```bash
 ./scripts/build-all.sh
 # Builds everything available for your platform
-# Or specify: ./scripts/build-all.sh --rpm --deb --app --docker
+# Or specify: ./scripts/build-all.sh --rpm --deb --app --msi --docker
 ```
 
 ---

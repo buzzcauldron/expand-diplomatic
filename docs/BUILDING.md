@@ -82,6 +82,40 @@ sudo yum install rpmbuild/RPMS/noarch/expand-diplomatic-*.rpm
 
 ---
 
+### Windows MSI Installer
+
+**Script:** `./scripts/build-windows-msi.sh`
+
+**Requires:**
+- Python 3.10+ with `cx_Freeze`
+- Windows or WSL2
+
+**Install requirements:**
+```bash
+pip install cx_Freeze
+```
+
+**Output:**
+- `dist/expand-diplomatic-*.msi`
+
+**Install:**
+```bash
+# Interactive install (double-click MSI file in Windows Explorer)
+
+# Or silent install from command line
+msiexec /i expand-diplomatic-*.msi /qn
+```
+
+**Features:**
+- GUI launcher: "Expand Diplomatic" in Start Menu
+- CLI: `expand-diplomatic.exe` added to PATH
+- Includes all dependencies (Python runtime, libraries, examples)
+- Uninstall via Windows Settings → Apps
+
+**Platforms:** Windows 10/11 (x64, arm64), WSL2
+
+---
+
 ### DEB Packages (Debian/Ubuntu)
 
 **Script:** `./scripts/build-deb.sh`

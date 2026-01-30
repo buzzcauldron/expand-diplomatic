@@ -12,11 +12,18 @@ The project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
   - Local parallelism 12 (vs 6); Ollama num_ctx=8192; Layered Training default on
   - Auto-learn cap 4000 when GPU; Parallel spinbox to 16 when local
   - Env: EXPANDER_AGGRESSIVE_LOCAL (force on/off), EXPANDER_GPU_VRAM_MB (threshold)
+- Automatic Gemini model detection from API with 24-hour caching (`expand_diplomatic/gemini_models.py`)
+- GUI refresh button (⟳) to update available Gemini models from API
+- Windows MSI installer build script (`scripts/build-windows-msi.sh`) using cx_Freeze
+- Training examples expanded: 44 new Latin abbreviation pairs (62 total, was 18)
 
 ### Changed
 
 - Speed: local rules pre-sort examples once per document (avoids per-block sort)
 - Speed: GUI caches block ranges for click/double-click sync (avoids re-parsing)
+- Speed: examples.json and learned_examples.json now mtime-cached to avoid redundant JSON parsing
+- Gemini models now fetched from API at startup; hardcoded list serves as fallback
+- Build system: `build-all.sh` now supports `--msi` flag for Windows installer builds
 
 ## [0.2.0] - 2026-01-30
 
