@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Master build script - builds all package formats
-# Usage: ./scripts/build-all.sh [--rpm] [--deb] [--app] [--docker] [--packages]
+# Usage: ./scripts/build-all.sh [--rpm] [--deb] [--app] [--msi] [--docker] [--packages]
 #        ./scripts/build-all.sh  # Builds everything available on this platform
 
 set -euo pipefail
@@ -13,6 +13,7 @@ PLATFORM="$(uname -s)"
 BUILD_RPM=0
 BUILD_DEB=0
 BUILD_APP=0
+BUILD_MSI=0
 BUILD_DOCKER=0
 BUILD_PACKAGES=0
 
@@ -27,6 +28,12 @@ if [[ $# -eq 0 ]]; then
         # Check what's available
         command -v rpmbuild &> /dev/null && BUILD_RPM=1
         command -v dpkg-deb &> /dev/null && BUILD_DEB=1
+        # Check for WSL2 for Windows MSI builds
+        if grep -qi microsoft /proc/version 2>/dev/null; then
+            BUILD_MSI=1
+        fi
+    elif [[ "$PLATFORM" =~ ^(MINGW|MSYS|CYGWIN) ]]; then
+        BUILD_MSI=1
     fi
 else
     # Parse specific build targets
@@ -35,11 +42,12 @@ else
             --rpm) BUILD_RPM=1 ;;
             --deb) BUILD_DEB=1 ;;
             --app) BUILD_APP=1 ;;
+            --msi) BUILD_MSI=1 ;;
             --docker) BUILD_DOCKER=1 ;;
             --packages) BUILD_PACKAGES=1 ;;
             *)
                 echo "Unknown option: $arg"
-                echo "Usage: $0 [--rpm] [--deb] [--app] [--docker] [--packages]"
+                echo "Usage: $0 [--rpm] [--deb] [--app] [--msi] [--docker] [--packages]"
                 exit 1
                 ;;
         esac
@@ -98,6 +106,19 @@ if [[ $BUILD_APP -eq 1 ]]; then
         echo ""
     else
         echo "⚠ Skipping macOS .app: not on macOS"
+        echo ""
+    fi
+fi
+
+# Build Windows MSI
+if [[ $BUILD_MSI -eq 1 ]]; then
+    if [[ "$PLATFORM" =~ ^(MINGW|MSYS|CYGWIN) ]] || grep -qi microsoft /proc/version 2>/dev/null; then
+        echo "→ Building Windows MSI installer..."
+        ./scripts/build-windows-msi.sh
+        BUILT+=("Windows MSI (dist/*.msi)")
+        echo ""
+    else
+        echo "⚠ Skipping Windows MSI: not on Windows or WSL2"
         echo ""
     fi
 fi

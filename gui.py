@@ -34,19 +34,15 @@ _ensure_env()
 
 # Lightweight imports only at startup (no run_gemini, lxml); expand_xml lazy-loaded on first Expand
 from expand_diplomatic.examples_io import add_learned_pairs, get_learned_path, load_examples, save_examples
+from expand_diplomatic.gemini_models import DEFAULT_MODEL, get_available_models
 
 DEFAULT_EXAMPLES = ROOT_DIR / "examples.json"
 BACKENDS = ("gemini", "local")
 MODALITIES = ("full", "conservative", "normalize", "aggressive", "local")
-GEMINI_MODELS = (
-    "gemini-2.5-flash-lite",  # Fastest
-    "gemini-3-flash-preview",
-    "gemini-2.0-flash",
-    "gemini-2.5-flash",       # Best price-performance (default) - mid-speed
-    "gemini-2.5-pro",
-    "gemini-3-pro-preview",   # Slowest but highest quality
-)
-DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
+
+# Load Gemini models (cached, with fallback)
+GEMINI_MODELS = get_available_models()
+DEFAULT_GEMINI_MODEL = DEFAULT_MODEL
 
 
 def _status(app: "App", msg: str) -> None:
@@ -614,6 +610,9 @@ class App:
         col += 1
         self._model_menu = tk.OptionMenu(r2, self.gemini_model_var, *GEMINI_MODELS)
         self._model_menu.grid(row=0, column=col, sticky=tk.W, **pad)
+        col += 1
+        self._model_refresh_btn = tk.Button(r2, text="⟳", width=2, command=self._on_refresh_models, **opts)
+        self._model_refresh_btn.grid(row=0, column=col, **pad)
         col += 1
         tk.Label(r2, text="Mod", **opts).grid(row=0, column=col, **pad)
         col += 1
@@ -1362,6 +1361,35 @@ class App:
             self.root.after(0, done)
 
         _status(self, "Testing Gemini…")
+        t = threading.Thread(target=run, daemon=True)
+        t.start()
+
+    def _on_refresh_models(self) -> None:
+        """Refresh Gemini model list from API."""
+        api_key = _resolve_api_key(self)
+        
+        def run() -> None:
+            from expand_diplomatic.gemini_models import get_available_models
+            models = get_available_models(api_key=api_key, force_refresh=True)
+            
+            def done() -> None:
+                global GEMINI_MODELS
+                GEMINI_MODELS = models
+                # Rebuild model dropdown menu
+                menu = self._model_menu["menu"]
+                menu.delete(0, "end")
+                for m in models:
+                    menu.add_command(label=m, command=lambda v=m: self.gemini_model_var.set(v))
+                # Ensure current selection is valid
+                current = self.gemini_model_var.get()
+                if current not in models:
+                    self.gemini_model_var.set(DEFAULT_GEMINI_MODEL if DEFAULT_GEMINI_MODEL in models else models[0])
+                _status(self, f"Models updated ({len(models)} available)")
+                messagebox.showinfo("Model refresh", f"Found {len(models)} Gemini models", parent=self.root)
+            
+            self.root.after(0, done)
+        
+        _status(self, "Fetching models…")
         t = threading.Thread(target=run, daemon=True)
         t.start()
 
