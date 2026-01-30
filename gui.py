@@ -45,6 +45,37 @@ GEMINI_MODELS = get_available_models()
 DEFAULT_GEMINI_MODEL = DEFAULT_MODEL
 
 
+def _add_tooltip(widget: tk.Widget, text: str, delay_ms: int = 500) -> None:
+    """Show text in a tooltip when hovering over widget."""
+    tip = [None]  # mutable ref for closure
+    after_id = [None]
+
+    def show(event: tk.Event) -> None:
+        def show_after() -> None:
+            after_id[0] = None
+            if tip[0] is not None:
+                return
+            tw = tk.Toplevel(widget)
+            tw.wm_overrideredirect(True)
+            tw.wm_geometry(f"+{event.x_root + 12}+{event.y_root + 12}")
+            lb = tk.Label(tw, text=text, justify=tk.LEFT, relief=tk.SOLID, borderwidth=1, background="#ffffc0", font=("", 9), padx=4, pady=2)
+            lb.pack()
+            tip[0] = tw
+
+        after_id[0] = widget.after(delay_ms, show_after)
+
+    def hide(event: tk.Event) -> None:
+        if after_id[0] is not None:
+            widget.after_cancel(after_id[0])
+            after_id[0] = None
+        if tip[0] is not None:
+            tip[0].destroy()
+            tip[0] = None
+
+    widget.bind("<Enter>", show)
+    widget.bind("<Leave>", hide)
+
+
 def _status(app: "App", msg: str) -> None:
     app.status_var.set(msg)
     app.root.update_idletasks()
@@ -132,7 +163,10 @@ def _expand_worker(
         def update_ui() -> None:
             app.last_progress_time = time.time()
             app._base_status = s
-            app.progress_bar["value"] = pct
+            # Whole-doc uses indeterminate bar (animating); only set value for block-by-block
+            if total > 1:
+                app.progress_bar.configure(mode="determinate")
+                app.progress_bar["value"] = pct
             # Show elapsed time
             elapsed = int(time.time() - app.expand_start_time)
             app.time_label_var.set(f"{elapsed}s")
@@ -161,6 +195,11 @@ def _expand_worker(
         
         app.root.after(0, update_output)
 
+    whole_doc = app.whole_document_var.get() if getattr(app, "whole_document_var", None) else True
+    ex_path = None
+    if whole_doc and backend == "gemini" and not getattr(app, "_expand_include_learned", True):
+        ex_path = getattr(app, "_expand_examples_path", None)
+
     result: str | None = None
     err: Exception | None = None
     try:
@@ -176,7 +215,8 @@ def _expand_worker(
             max_concurrent=max_concurrent,
             passes=passes,
             cancel_check=cancel_check,
-            whole_document=app.whole_document_var.get() if getattr(app, "whole_document_var", None) else True,
+            whole_document=whole_doc,
+            examples_path=ex_path,
         )
     except Exception as e:
         err = e
@@ -184,6 +224,11 @@ def _expand_worker(
     def on_done() -> None:
         from run_gemini import format_api_error
         app.expand_btn.config(state=tk.NORMAL, text="Expand")
+        try:
+            app.progress_bar.stop()
+        except Exception:
+            pass
+        app.progress_bar.configure(mode="determinate")
         app.progress_bar["value"] = 0
         app.time_label_var.set("")
         app.cancel_btn.config(state=tk.DISABLED)
@@ -491,7 +536,13 @@ def _run_expand_internal(
     app.expand_running = True
     app.cancel_requested = False
     app.expand_run_id = getattr(app, "expand_run_id", 0) + 1
-    app.progress_bar["value"] = 0
+    whole_doc = app.whole_document_var.get() if getattr(app, "whole_document_var", None) else True
+    if whole_doc:
+        app.progress_bar.configure(mode="indeterminate")
+        app.progress_bar.start(10)
+    else:
+        app.progress_bar.configure(mode="determinate")
+        app.progress_bar["value"] = 0
     app.cancel_btn.config(state=tk.NORMAL)
     # Start processing animation
     app._processing_frame = 0
@@ -499,6 +550,8 @@ def _run_expand_internal(
     _update_processing_indicator(app)
     _start_hang_check(app)
     run_id = app.expand_run_id
+    app._expand_examples_path = examples_path if not include_learned else None
+    app._expand_include_learned = include_learned
     t = threading.Thread(
         target=_expand_worker,
         args=(xml, examples, api_key, app, backend, model, modality, max_concurrent, passes, run_id),
@@ -605,6 +658,7 @@ class App:
             (tk.Button, "▶", self._on_next_file, {"width": 2}),
             (tk.Button, "In→TXT", self._on_save_input_txt, {"width": 5}),
             (tk.Button, "Out→TXT", self._on_save_output_txt, {"width": 6}),
+            (tk.Button, "Diff", self._on_diff, {"width": 4}),
         ]:
             cls, txt, cmd, kw = w
             btn = cls(r1, text=txt, command=cmd, **{**pad, **kw})
@@ -614,7 +668,7 @@ class App:
         # Row 1: Settings (grid so Examples entry expands)
         r2 = tk.Frame(bar)
         r2.pack(side=tk.TOP, fill=tk.X)
-        r2.columnconfigure(16, weight=1, minsize=80)  # Examples entry expands
+        r2.columnconfigure(17, weight=1, minsize=80)  # Examples entry expands
         col = 0
         tk.Label(r2, text="Backend", **opts).grid(row=0, column=col, **pad)
         col += 1
@@ -645,7 +699,16 @@ class App:
         self.passes_var = tk.StringVar(value="1")
         tk.Spinbox(r2, from_=1, to=5, width=2, textvariable=self.passes_var).grid(row=0, column=col, sticky=tk.W, **pad)
         col += 1
-        tk.Checkbutton(r2, text="Whole doc", variable=self.whole_document_var, **opts).grid(row=0, column=col, sticky=tk.W, **pad)
+        tk.Label(r2, text="Expand", **opts).grid(row=0, column=col, **pad)
+        col += 1
+        expand_toggle = tk.Frame(r2)
+        expand_toggle.grid(row=0, column=col, sticky=tk.W, **pad)
+        rb_whole = tk.Radiobutton(expand_toggle, text="Whole doc", variable=self.whole_document_var, value=True, **opts)
+        rb_whole.pack(side=tk.LEFT)
+        rb_block = tk.Radiobutton(expand_toggle, text="Block-by-block", variable=self.whole_document_var, value=False, **opts)
+        rb_block.pack(side=tk.LEFT)
+        _add_tooltip(rb_whole, "Expand entire document in one API call (default)")
+        _add_tooltip(rb_block, "Expand each block separately; shows per-block progress")
         col += 1
         tk.Checkbutton(r2, text="Learn", variable=self.auto_learn_var, **opts).grid(row=0, column=col, sticky=tk.W, **pad)
         col += 1
@@ -1418,6 +1481,9 @@ class App:
         failed = []
         cancelled = [False]
 
+        whole_doc = self.whole_document_var.get() if getattr(self, "whole_document_var", None) else True
+        ex_path = examples_path if (whole_doc and backend == "gemini" and not include_learned) else None
+
         def expand_one(f: Path) -> tuple[Path, bool, str]:
             # Mark as processing
             self.root.after(0, lambda: self._update_batch_file_status(f.name, "processing"))
@@ -1431,7 +1497,8 @@ class App:
                     api_key=api_key,
                     backend=backend,
                     modality=modality,
-                    whole_document=self.whole_document_var.get() if getattr(self, "whole_document_var", None) else True,
+                    whole_document=whole_doc,
+                    examples_path=ex_path,
                 )
                 out_path.write_text(result, encoding="utf-8")
                 return (f, True, f.name)
@@ -1447,6 +1514,11 @@ class App:
             def on_done():
                 self.expand_running = False
                 self.cancel_btn.config(state=tk.DISABLED)
+                try:
+                    self.progress_bar.stop()
+                except Exception:
+                    pass
+                self.progress_bar.configure(mode="determinate")
                 self.progress_bar["value"] = 0
                 # Final update to batch list
                 self._update_batch_list()
@@ -1499,6 +1571,11 @@ class App:
                 self.root.after(0, on_done)
 
         _status(self, f"Batch: 0/{total}")
+        try:
+            self.progress_bar.stop()
+        except Exception:
+            pass
+        self.progress_bar.configure(mode="determinate")
         self.progress_bar["value"] = 0
         t = threading.Thread(target=run_batch, daemon=True)
         t.start()
@@ -1511,6 +1588,11 @@ class App:
         _stop_hang_check(self)
         self.expand_btn.config(state=tk.NORMAL)
         self.cancel_btn.config(state=tk.DISABLED)
+        try:
+            self.progress_bar.stop()
+        except Exception:
+            pass
+        self.progress_bar.configure(mode="determinate")
         self.progress_bar["value"] = 0
         self.time_label_var.set("")
         _status(self, "Cancelling…")
@@ -1637,6 +1719,37 @@ class App:
             _status(self, f"Saved output lines: {Path(path).name}")
         except Exception as e:
             messagebox.showerror("Save failed", str(e))
+
+    def _on_diff(self) -> None:
+        """Show diff between input and output panels (diff input.xml output.xml style)."""
+        inp = self.input_txt.get("1.0", tk.END)
+        out = self.output_txt.get("1.0", tk.END)
+        if not out.strip():
+            messagebox.showwarning("Diff", "Output is empty. Run Expand first.")
+            return
+        inp_label = str(self.last_input_path) if self.last_input_path else "input.xml"
+        out_label = str(self.last_output_path) if self.last_output_path else "output.xml"
+        try:
+            import difflib
+            lines_inp = inp.splitlines(keepends=True)
+            lines_out = out.splitlines(keepends=True)
+            diff_lines = list(difflib.unified_diff(
+                lines_inp, lines_out,
+                fromfile=inp_label,
+                tofile=out_label,
+                lineterm="",
+            ))
+            diff_text = "".join(diff_lines) if diff_lines else "(no differences)"
+        except Exception as e:
+            diff_text = f"Diff failed: {e}"
+        win = tk.Toplevel(self.root)
+        win.title("Diff: input vs output")
+        win.geometry("700x400")
+        txt = scrolledtext.ScrolledText(win, font=("Courier", 9), wrap=tk.NONE)
+        txt.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+        txt.insert(tk.END, diff_text)
+        txt.config(state=tk.DISABLED)
+        _add_tooltip(txt, "diff input.xml output.xml — lines with - are input only, + are output only")
 
     def _on_browse_examples(self) -> None:
         path = filedialog.askopenfilename(
