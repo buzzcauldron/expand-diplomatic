@@ -115,7 +115,7 @@ python gui.py
 
 - **Input→TXT** / **Output→TXT** – Export text blocks to plain `.txt` files.
 - **Click to sync** – Click a block in input or output to jump to the matching block in the other panel.
-- **Double-click smart pairing** – Double-click a block to select it in both panels. If input/output files are mismatched (e.g., you loaded a different file after expanding), double-clicking automatically loads the correct paired file (`filename.xml` ↔ `filename_expanded.xml`) to bring them into alignment.
+- **Double-click companion line** – Double-click a block to select it in both panels and show the matching line in the companion XML. The program opens the companion file in the other panel if needed (e.g. `filename_expanded.xml` when you double-click in input, or `filename.xml` when you double-click in output), then scrolls to the same block index so you always see input and output from the same pair of files.
 - **Image panel** – Click the 🖼▶ strip on the right to expand and upload an image for reference.
 - **Passes** – Run expansion more than once in a row to refine the text.
 
@@ -217,6 +217,32 @@ For local expansion only (no API key):
 On Apple Silicon, uses arm64 (native) by default, not amd64 (emulated).
 
 You need [Docker](https://docs.docker.com/get-docker/) installed and running.
+
+---
+
+## Run after install
+
+**From source** (in the project folder, with venv activated):
+
+| Action | Command |
+|--------|---------|
+| **GUI** | `python gui.py` |
+| **CLI** (one file) | `python -m expand_diplomatic --file document.xml` |
+| **CLI** (folder) | `python -m expand_diplomatic --batch-dir ./my_xml_folder` |
+
+**After pip install** (e.g. `pip install dist/expand_diplomatic-*.whl`):
+
+| Action | Command |
+|--------|---------|
+| **GUI** | `expand-diplomatic-gui` |
+| **CLI** (one file) | `expand-diplomatic --file document.xml` |
+| **CLI** (folder) | `expand-diplomatic --batch-dir ./my_xml_folder` |
+
+**Other installs:**  
+- **Windows MSI** — Start Menu → “Expand Diplomatic”, or run `expand-diplomatic-gui` / `expand-diplomatic` in a terminal.  
+- **macOS .app** — Open `Expand-Diplomatic.app` from Applications (or double‑click in `dist/`).  
+- **RPM / DEB** — Run `expand-diplomatic-gui` or `expand-diplomatic` from any terminal.  
+- **Docker** — `./run-container.sh -- --file sample.xml` (see Container section).
 
 ---
 

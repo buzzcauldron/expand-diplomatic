@@ -209,6 +209,8 @@ def _expand_worker(
         
         app.output_txt.delete("1.0", tk.END)
         app.output_txt.insert("1.0", result or "")
+        if getattr(app, "last_input_path", None) is not None:
+            app.last_output_path = app.last_input_path.parent / f"{app.last_input_path.stem}_expanded.xml"
         
         # Restore scroll position (don't move page)
         if scroll_pos is not None:
@@ -537,6 +539,7 @@ class App:
         self.last_expand_model = DEFAULT_GEMINI_MODEL
         self.last_dir: Path | None = None  # last Open/Save directory, for file dialogs
         self.last_input_path: Path | None = None  # last opened XML file (for TXT default names)
+        self.last_output_path: Path | None = None  # file currently shown in output panel (for companion sync)
         self.folder_files: list[Path] = []  # XML files in current folder for Prev/Next
         self.folder_index: int = -1
         self.backend_var = tk.StringVar(value="gemini")
@@ -1088,77 +1091,53 @@ class App:
         return "break"  # Prevent default word selection
     
     def _check_and_load_paired_file(self, clicked_input_panel: bool) -> bool:
-        """Check if input/output files are mismatched and load the correct paired file.
+        """On double-click, load the companion XML into the other panel so the matching line is shown in the correct file.
         Returns True if a file was loaded, False otherwise."""
-        if self.last_input_path is None:
-            return False
-        
-        # Determine expected paired file
         if clicked_input_panel:
-            # Double-clicked in input panel - check if output should be loaded
+            # Double-clicked in input: open companion output file (input_stem_expanded.xml) in output panel
+            if self.last_input_path is None:
+                return False
             expected_output = self.last_input_path.parent / f"{self.last_input_path.stem}_expanded.xml"
             if not expected_output.exists():
                 return False
-            
-            # Check if output panel content matches the expected file
-            current_output = self.output_txt.get("1.0", tk.END).strip()
-            if not current_output:
-                # Output is empty, load the paired file
+            # Load companion into output unless it's already showing that file
+            if self.last_output_path is None or self.last_output_path.resolve() != expected_output.resolve():
                 try:
                     output_text = expected_output.read_text(encoding="utf-8")
                     self.output_txt.delete("1.0", tk.END)
                     self.output_txt.insert("1.0", output_text)
                     self.output_txt.see("1.0")
-                    _status(self, f"Loaded paired: {expected_output.name}")
+                    self.last_output_path = expected_output
+                    _status(self, f"Loaded companion: {expected_output.name}")
                     return True
                 except Exception:
                     return False
-            
-            # Check if content is from a different file by comparing first 200 chars
-            try:
-                expected_text = expected_output.read_text(encoding="utf-8")
-                if expected_text[:200].strip() != current_output[:200].strip():
-                    # Content mismatch, load the correct file
-                    self.output_txt.delete("1.0", tk.END)
-                    self.output_txt.insert("1.0", expected_text)
-                    self.output_txt.see("1.0")
-                    _status(self, f"Loaded paired: {expected_output.name}")
-                    return True
-            except Exception:
-                return False
+            return False
         else:
-            # Double-clicked in output panel - check if we can find the corresponding input
-            output_text = self.output_txt.get("1.0", tk.END).strip()
-            if not output_text or not self.last_input_path:
+            # Double-clicked in output: open companion input file (base .xml) in input panel
+            if self.last_output_path is None:
                 return False
-            
-            # Check if the output is from an _expanded.xml file
-            # Try to find the corresponding input file
-            if "_expanded" in str(self.last_input_path):
-                # Current input is an expanded file, find the base file
-                base_name = self.last_input_path.stem.replace("_expanded", "")
-                expected_input = self.last_input_path.parent / f"{base_name}.xml"
-            else:
-                # Check if there's a mismatch by seeing if output looks like it's from a different source
-                expected_input = self.last_input_path
-            
-            if expected_input.exists() and expected_input != self.last_input_path:
+            stem = self.last_output_path.stem
+            if "_expanded" not in stem:
+                return False
+            base_name = stem.replace("_expanded", "")
+            expected_input = self.last_output_path.parent / f"{base_name}.xml"
+            if not expected_input.exists():
+                return False
+            # Load companion into input unless it's already showing that file
+            if self.last_input_path is None or self.last_input_path.resolve() != expected_input.resolve():
                 try:
                     input_text = expected_input.read_text(encoding="utf-8")
-                    current_input = self.input_txt.get("1.0", tk.END).strip()
-                    if input_text[:200].strip() != current_input[:200].strip():
-                        # Load the correct input file
-                        self.input_txt.delete("1.0", tk.END)
-                        self.input_txt.insert("1.0", input_text)
-                        self.input_txt.see("1.0")
-                        self.last_input_path = expected_input
-                        self.original_input = input_text
-                        _status(self, f"Loaded paired: {expected_input.name}")
-                        return True
+                    self.input_txt.delete("1.0", tk.END)
+                    self.input_txt.insert("1.0", input_text)
+                    self.input_txt.see("1.0")
+                    self.last_input_path = expected_input
+                    self.original_input = input_text
+                    _status(self, f"Loaded companion: {expected_input.name}")
+                    return True
                 except Exception:
                     return False
-        
-        return False
+            return False
 
     def _file_dialog_dir(self) -> Path:
         """Directory for file dialogs: last path from any file selection, else examples dir, else project root."""
@@ -1218,12 +1197,14 @@ class App:
     def _load_expanded_if_exists(self, input_path: Path) -> None:
         """Clear output panel; if <stem>_expanded.xml exists, load it."""
         self.output_txt.delete("1.0", tk.END)
+        self.last_output_path = None
         expanded_path = input_path.parent / f"{input_path.stem}_expanded.xml"
         if expanded_path.exists():
             try:
                 text = expanded_path.read_text(encoding="utf-8")
                 self.output_txt.insert("1.0", text)
                 self.output_txt.see("1.0")
+                self.last_output_path = expanded_path
             except Exception:
                 pass
 
