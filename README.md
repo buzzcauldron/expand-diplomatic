@@ -223,6 +223,52 @@ You need [Docker](https://docs.docker.com/get-docker/) installed and running.
 
 ---
 
+## Windows
+
+### Running from source on Windows
+
+1. **Install Python 3.10+** from [python.org](https://www.python.org/downloads/). During setup, check **“Add Python to PATH”** so you can use `python` from Command Prompt or PowerShell.
+2. Open **Command Prompt** (`cmd`) or **PowerShell** and go to the project folder, e.g. `cd C:\Users\You\magic-elise-tool`.
+3. Create and activate a virtual environment:
+   ```bat
+   python -m venv .venv
+   .venv\Scripts\activate
+   ```
+4. Install dependencies and run the GUI:
+   ```bat
+   pip install -r requirements.txt
+   python gui.py
+   ```
+   When the venv is active, your prompt will usually show `(.venv)`.
+
+### Getting a Windows executable (no Python required on the target PC)
+
+You can build a **portable ZIP** that contains ready-to-run `.exe` files. No MSI installer is required.
+
+- **Recommended: portable ZIP**  
+  One script builds everything. You get a single ZIP file; users extract it anywhere and run `expand-diplomatic-gui.exe` (or `expand-diplomatic.exe` for the CLI). No installation step, no Start Menu—just extract and run.
+
+- **Where to build**  
+  The build must run on **Windows** or **WSL2** (Windows Subsystem for Linux), because it produces Windows executables. Use Python 3.10+ in that environment.
+
+- **How to build the portable ZIP**  
+  In the project folder, on Windows (e.g. in PowerShell or Git Bash) or in WSL2:
+  ```bash
+  ./scripts/build-windows-zip.sh
+  ```
+  The script installs `requirements.txt` and `cx_Freeze` if needed, then builds the exes and packs them into **`dist/expand-diplomatic-portable.zip`**.
+
+- **Using the ZIP**  
+  Copy `expand-diplomatic-portable.zip` to any Windows machine. Extract it to a folder (e.g. `C:\Tools\expand-diplomatic`). The contents appear directly in that folder (no extra subfolder). Double‑click **`expand-diplomatic-gui.exe`** to start the GUI, or run **`expand-diplomatic.exe`** from a command prompt for the CLI. No Python or installer is required on that machine.
+
+- **Optional: MSI installer**  
+  If you need a traditional installer (Start Menu, Add/Remove Programs), use `./scripts/build-windows-msi.sh`. The MSI build is more environment-dependent; if it fails, use the portable ZIP build above. See [Building and Packaging](docs/BUILDING.md) for details.
+
+- **Antivirus or “Windows protected your PC”**  
+  The built `.exe` files are not signed. Windows or antivirus may warn the first time you run them. You can choose “More info” → “Run anyway” or add an exception for the folder where you extracted the ZIP.
+
+---
+
 ## Run after install
 
 **From source** (in the project folder, with venv activated):
@@ -242,7 +288,8 @@ You need [Docker](https://docs.docker.com/get-docker/) installed and running.
 | **CLI** (folder) | `expand-diplomatic --batch-dir ./my_xml_folder` |
 
 **Other installs:**  
-- **Windows MSI** — Start Menu → “Expand Diplomatic”, or run `expand-diplomatic-gui` / `expand-diplomatic` in a terminal.  
+- **Windows (portable ZIP)** — Extract `expand-diplomatic-portable.zip` to a folder; run `expand-diplomatic-gui.exe` or `expand-diplomatic.exe`. See **Windows** section above.  
+- **Windows (MSI)** — Start Menu → “Expand Diplomatic”, or run `expand-diplomatic-gui` / `expand-diplomatic` in a terminal.  
 - **macOS .app** — Open `Expand-Diplomatic.app` from Applications (or double‑click in `dist/`).  
 - **RPM / DEB** — Run `expand-diplomatic-gui` or `expand-diplomatic` from any terminal.  
 - **Docker** — `./run-container.sh -- --file sample.xml` (see Container section).
@@ -260,13 +307,10 @@ Build native packages for different platforms:
 # Install: pip install dist/expand_diplomatic-*.whl
 ```
 
-### Windows MSI and portable ZIP
-```bash
-./scripts/build-windows-msi.sh
-# Requires: Python with cx_Freeze on Windows or WSL2
-# Output: dist/*.msi and dist/expand-diplomatic-portable.zip
-# MSI: Double-click to install. Portable ZIP: extract to any folder — files go directly there (no subfolder).
-```
+### Windows executable (portable ZIP recommended)
+See the **Windows** section above for full explanation. Summary:
+- **Portable ZIP (recommended):** `./scripts/build-windows-zip.sh` — one command on Windows or WSL2; installs deps and builds `dist/expand-diplomatic-portable.zip`. Extract on Windows and run `expand-diplomatic-gui.exe` or `expand-diplomatic.exe`. No installer.
+- **MSI (optional):** `./scripts/build-windows-msi.sh` — produces an installer plus the same portable ZIP; more environment-dependent. If MSI fails, use the ZIP build.
 
 ### RPM (Red Hat, Fedora, CentOS, Rocky Linux)
 ```bash

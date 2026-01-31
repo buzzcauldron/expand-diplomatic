@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 #
-# Build Windows portable ZIP for expand-diplomatic.
+# Build Windows portable ZIP for expand-diplomatic (recommended: no MSI).
+# Single command: installs deps then builds a ZIP you can extract and run on Windows.
 # Contents are at ZIP root so extracting does NOT create a subfolder.
-#
-# Requires: Python with cx_Freeze on Windows or WSL2
 #
 # Usage: ./scripts/build-windows-zip.sh [--no-clean]
 
@@ -14,7 +13,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 BUILD_DIR="$PROJECT_ROOT/build"
 DIST_DIR="$PROJECT_ROOT/dist"
 
-echo "=== Building Windows portable ZIP (flat, no subfolder) ==="
+echo "=== Building Windows portable ZIP (no MSI — extract and run) ==="
 cd "$PROJECT_ROOT"
 
 # Check platform
@@ -29,13 +28,17 @@ case "$(uname -s)" in
         ;;
 esac
 
+# Install build dependencies (single-command: deps + build)
+echo "Installing build dependencies..."
+python -m pip install --upgrade pip -q
+python -m pip install -r "$PROJECT_ROOT/requirements.txt" -q
+python -c "import cx_Freeze" 2>/dev/null || { python -m pip install -q cx_Freeze; }
+echo "Dependencies OK."
+
 # Clean unless --no-clean
 if [[ "$1" != "--no-clean" ]]; then
     rm -rf "$BUILD_DIR" "$DIST_DIR"/*.zip
 fi
-
-# Ensure cx_Freeze is installed
-python -c "import cx_Freeze" 2>/dev/null || { python -m pip install -q cx_Freeze; }
 
 # Create .ico from .png if needed (Windows prefers .ico for exe icon)
 ICON_ICO="$PROJECT_ROOT/stretch_armstrong_icon.ico"
