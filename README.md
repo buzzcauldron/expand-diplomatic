@@ -149,6 +149,8 @@ Open `examples.json` in a text editor. Add pairs like this:
 
 More examples = better results. The app also saves learned pairs from expansions when **Learn** is on. Use **Layered Training** to include those learned pairs in the prompt.
 
+**Suggested workflow:** Open an XML file → add a few pairs from selection (In/Out) → Expand → Save. Use **Diff** to spot missed forms, add more pairs, then **Re-expand**. For many files, use **Batch…** once settings and examples are good. See [Speed & efficiency](docs/SPEED_EFFICIENCY.md) for more workflow notes.
+
 ---
 
 ## Command-line usage

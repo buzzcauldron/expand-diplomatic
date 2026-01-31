@@ -41,3 +41,43 @@ Override: `EXPANDER_AGGRESSIVE_LOCAL=0` to disable; `=1` to force on (even on ba
 - Timeout retry: one automatic retry on `TimeoutError` (transient).
 - Batch with Pro: parallel capped at 2 to avoid overload.
 - `OLLAMA_TIMEOUT`: For local backend (default 120s).
+
+---
+
+## Efficiency review (summary)
+
+**Already efficient**
+
+- Examples: mtime cache (cap 8 paths); cache cleared on save so next load is fresh.
+- Block ranges: GUI cache keyed by content string, cap 4; avoids repeated lxml parse on click/sync.
+- Expansion: prompt prefix and `sorted_pairs` built once per document; client/uploaded_file reused for block-by-block when Files API is used; parallel block expansion with throttled partial callbacks.
+- Gemini: model list cached 24h; fallback list for instant startup; 429/timeout retries.
+
+**Optional improvement**
+
+- Clear GUI block-ranges cache when loading a new file so we don’t retain multiple large XML strings (cache is cleared on new Open/load).
+
+---
+
+## Workflow improvements (suggested)
+
+**User workflow (GUI)**
+
+1. **First pass:** Open XML → add a few pairs from selection (In/Out) → Expand → Save.
+2. **Refine:** Use Diff to see changes; add more pairs for missed or wrong forms → Re-expand.
+3. **Batch:** Once settings and examples are good, use Batch… on a folder (same modality/examples).
+4. **Learn:** Keep Learn on so expansions feed `learned_examples.json`; use Layered Training to include them in the prompt.
+5. **Companion files:** Double-click a line to open the paired file in the other panel; use Prev/Next for same-folder navigation.
+
+**CLI / automation**
+
+- Single file: `python -m expand_diplomatic --file doc.xml` → `doc_expanded.xml`.
+- Folder: `--batch-dir ./xml_folder --out-dir ./out --parallel-files 4`.
+- Local (no API): `--backend local`.
+- Dry-run: `--dry-run` to test pipeline without calling the API.
+
+**Developer workflow**
+
+- Run tests: `pytest tests/`.
+- Add examples: edit `examples.json` or use GUI Train; CLI `--train --add "diplomatic" "full"`.
+- Version: bump `_version.py` and `pyproject.toml`; add entry to `CHANGELOG.md`.

@@ -1441,6 +1441,9 @@ class App:
             self.last_input_path = p
             self.folder_files = sorted(p.parent.glob("*.xml"))
             self.folder_index = next((i for i, f in enumerate(self.folder_files) if f.resolve() == p.resolve()), -1)
+            _block_ranges_cache = getattr(self, "_block_ranges_cache", None)
+            if _block_ranges_cache is not None:
+                _block_ranges_cache.clear()
             self._load_expanded_if_exists(p)
             # Detect format and update status bar
             from expand_diplomatic.expander import is_page_xml
@@ -1457,6 +1460,9 @@ class App:
         self.input_txt.insert("1.0", text)
         self.original_input = text
         self.last_input_path = p
+        _block_ranges_cache = getattr(self, "_block_ranges_cache", None)
+        if _block_ranges_cache is not None:
+            _block_ranges_cache.clear()
         self._load_expanded_if_exists(p)
         # Detect format and update status bar
         from expand_diplomatic.expander import is_page_xml
