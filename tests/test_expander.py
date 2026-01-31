@@ -38,6 +38,11 @@ def test_run_local_rules() -> None:
     assert run_local_rules("", []) == ""
     assert run_local_rules("x", []) == "x"
     assert run_local_rules("y^e", [{"diplomatic": "y^e", "full": "the"}]) == "the"
+    # NFC/NFD: gratia (precomposed ã vs a+combining tilde) both match
+    assert run_local_rules("grã", [{"diplomatic": "grã", "full": "gratia"}]) == "gratia"
+    assert run_local_rules("gra\u0303", [{"diplomatic": "grã", "full": "gratia"}]) == "gratia"
+    # et cetera (⁊c̃)
+    assert run_local_rules("⁊c̃", [{"diplomatic": "⁊c̃", "full": "et cetera"}]) == "et cetera"
 
 
 def test_expand_xml_dry_run() -> None:
