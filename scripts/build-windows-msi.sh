@@ -75,7 +75,7 @@ from cx_Freeze import setup, Executable
 
 # Read version
 version_file = Path(__file__).parent / "expand_diplomatic" / "_version.py"
-version = "0.2.0"
+version = "0.3.0"
 for line in version_file.read_text().splitlines():
     if line.startswith("__version__"):
         version = line.split("=")[1].strip().strip('"').strip("'")

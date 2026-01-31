@@ -35,6 +35,34 @@ jobs:
           name: dist-${{ matrix.os }}
           path: dist/
 
+  windows:
+    name: windows-msi-zip
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install -e .
+          pip install cx_Freeze Pillow
+
+      - name: Build MSI and portable ZIP
+        run: ./scripts/build-windows-msi.sh
+        shell: bash
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-windows
+          path: |
+            dist/*.msi
+            dist/*.zip
+
   docker:
     name: docker-multiarch
     runs-on: ubuntu-latest
