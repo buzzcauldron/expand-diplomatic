@@ -359,14 +359,17 @@ def _expand_text_block(
 ) -> str:
     if not text or not text.strip():
         return text
-    prompt = (prompt_prefix + text + "\nFull:") if prompt_prefix else _build_prompt(examples, text, modality=modality)
     if backend == "local":
-        from .local_llm import run_local
+        from .local_llm import run_local, run_local_rules
 
+        # Apply training pairs first (authoritative): model sees pre-expanded text
+        text_pre = run_local_rules(text, examples=examples, sorted_pairs=sorted_pairs) if examples else text
+        prompt = (prompt_prefix + text_pre + "\nFull:") if prompt_prefix else _build_prompt(examples, text_pre, modality=modality)
         return run_local(
             text, examples, prompt, model=model,
             sorted_pairs=sorted_pairs, high_end_gpu=high_end_gpu,
         )
+    prompt = (prompt_prefix + text + "\nFull:") if prompt_prefix else _build_prompt(examples, text, modality=modality)
     from run_gemini import run_gemini
 
     system = MODALITY_SYSTEM.get(modality) or MODALITY_SYSTEM["full"]
