@@ -6,6 +6,8 @@ The project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-01-30
+
 ### Added
 
 - High-end GPU detection (NVIDIA or AMD >= 8GB VRAM): triggers aggressive local training when on AC power (disabled on battery)
@@ -15,6 +17,8 @@ The project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 - Automatic Gemini model detection from API with 24-hour caching (`expand_diplomatic/gemini_models.py`)
 - GUI refresh button (⟳) to update available Gemini models from API
 - Windows MSI installer build script (`scripts/build-windows-msi.sh`) using cx_Freeze
+- Windows portable ZIP: flat structure (no subfolder when extracted); `build-windows-zip.sh`, `build-all.sh --zip`
+- Pro model tests: timeout, retry, batch parallel cap (`tests/test_run_gemini.py`)
 - Training examples expanded: 44 new Latin abbreviation pairs (62 total, was 18)
 - **Expansion queue system**: Click Expand/Re-expand or navigate files while expansion is running to queue jobs
   - Expand button shows "Queued (N)" with queue count during expansion
@@ -33,9 +37,17 @@ The project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 - Speed: GUI caches block ranges for click/double-click sync (avoids re-parsing)
 - Speed: examples.json and learned_examples.json now mtime-cached to avoid redundant JSON parsing
 - Gemini models now fetched from API at startup; hardcoded list serves as fallback
-- Build system: `build-all.sh` now supports `--msi` flag for Windows installer builds
-- Default Gemini model: `gemini-3-flash-preview`; single source `gemini_models.DEFAULT_MODEL` (no hardcoded gemini-2.5-flash)
-- Whole-document expansion: default one API call per document (max_output_tokens 40000); `--block-by-block` or uncheck "Whole doc" for per-block mode
+- Default Gemini model: `gemini-2.5-flash` (best value); model dropdown shows speed tick marks (······ = fastest)
+- Build system: `build-all.sh` supports `--msi`, `--zip`; MSI also produces portable ZIP
+- Whole-document expansion: `--block-by-block` default; Whole doc for batch; hang threshold 330s for whole-doc
+
+### Fixed
+
+- Invalid XML: guard when lxml returns None (e.g. "-", "{}"); clear error instead of crash
+- Whole-doc progress: hang warning uses 330s threshold (not 90s) to avoid false positives
+- Windows: prefs in `%APPDATA%`, cache in `%LOCALAPPDATA%`; Courier New font; setproctitle guarded
+- Windows: paired-line highlight uses custom `paired` tag (sel invisible when unfocused)
+- MSI: icon conversion PNG→ICO; `[ProgramFiles64Folder]`; `run_gemini` included; WSL2 uses `python.exe`
 
 ## [0.2.0] - 2026-01-30
 

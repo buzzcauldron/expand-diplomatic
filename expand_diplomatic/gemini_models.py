@@ -13,7 +13,18 @@ import time
 from pathlib import Path
 from typing import Optional
 
-_CACHE_FILE = Path.home() / ".cache" / "expand_diplomatic" / "gemini_models.txt"
+
+def _cache_dir() -> Path:
+    """Cache directory: LOCALAPPDATA on Windows, .cache in home elsewhere."""
+    if os.name == "nt":
+        base = os.environ.get("LOCALAPPDATA", "").strip()
+        if not base:
+            base = str(Path.home())
+        return Path(base) / "expand_diplomatic"
+    return Path.home() / ".cache" / "expand_diplomatic"
+
+
+_CACHE_FILE = _cache_dir() / "gemini_models.txt"
 _CACHE_TTL_SECONDS = 86400  # 24 hours
 
 # Fallback models (ordered by speed: fastest to slowest). Used for fast startup before API fetch.

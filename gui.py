@@ -19,7 +19,19 @@ from dotenv import load_dotenv, set_key
 ROOT_DIR = Path(__file__).resolve().parent
 ENV_PATH = ROOT_DIR / ".env"
 ENV_EXAMPLE = ROOT_DIR / ".env.example"
-PREFS_PATH = Path.home() / ".config" / "expand_diplomatic" / "preferences.json"
+
+
+def _config_dir() -> Path:
+    """Config directory: APPDATA on Windows, .config in home elsewhere."""
+    if os.name == "nt":
+        base = os.environ.get("APPDATA", "").strip()
+        if not base:
+            base = str(Path.home())
+        return Path(base) / "expand_diplomatic"
+    return Path.home() / ".config" / "expand_diplomatic"
+
+
+PREFS_PATH = _config_dir() / "preferences.json"
 
 
 def _ensure_env() -> None:
@@ -613,8 +625,8 @@ def _set_app_display_name() -> None:
     try:
         import setproctitle
         setproctitle.setproctitle(_APP_NAME)
-    except ImportError:
-        pass
+    except (ImportError, OSError, AttributeError):
+        pass  # setproctitle unavailable or unsupported (e.g. Windows)
 
 
 class App:
@@ -642,8 +654,9 @@ class App:
         self.status_var = tk.StringVar(value="Idle")
         self.examples_var = tk.StringVar(value=str(DEFAULT_EXAMPLES))
         self.expand_btn: tk.Button = None  # set later
-        self._font = ("Courier", 10)
-        self._font_sm = ("Courier", 9)
+        # Courier common on Unix; Courier New on Windows
+        self._font = ("Courier New", 10) if os.name == "nt" else ("Courier", 10)
+        self._font_sm = ("Courier New", 9) if os.name == "nt" else ("Courier", 9)
         self.session_api_key: str | None = None
         self.backend: str = "gemini"
         self.model_gemini: str = os.environ.get("GEMINI_MODEL", DEFAULT_GEMINI_MODEL)
@@ -830,13 +843,16 @@ class App:
         panes.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=4, pady=2)
         left = tk.LabelFrame(panes, text="Input (XML)")
         left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=2)
-        opts = {"wrap": tk.WORD, "font": self._font}
+        opts = {"wrap": tk.WORD, "font": self._font, "exportselection": False}
         self.input_txt = scrolledtext.ScrolledText(left, **opts)
         self.input_txt.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
         right = tk.LabelFrame(panes, text="Output (expanded)")
         right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=2)
         self.output_txt = scrolledtext.ScrolledText(right, **opts)
         self.output_txt.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
+        # Paired highlight: visible when widget is unfocused (Windows hides "sel" when unfocused)
+        for w in (self.input_txt, self.output_txt):
+            w.tag_configure("paired", background="#b3d9ff")
         self.input_txt.bind("<Button-1>", self._on_panel_click)
         self.output_txt.bind("<Button-1>", self._on_panel_click)
         self.input_txt.bind("<Double-Button-1>", self._on_panel_double_click)
@@ -1155,8 +1171,8 @@ class App:
         start, end = other_ranges[block_idx]
         start_idx = other.index(f"1.0 + {start} chars")
         end_idx = other.index(f"1.0 + {end} chars")
-        other.tag_remove("sel", "1.0", tk.END)
-        other.tag_add("sel", start_idx, end_idx)
+        other.tag_remove("paired", "1.0", tk.END)
+        other.tag_add("paired", start_idx, end_idx)
         other.mark_set("insert", start_idx)
         # Scroll to align both blocks at same vertical position
         try:
@@ -1194,8 +1210,8 @@ class App:
             o_start, o_end = other_ranges[block_idx]
             o_start_idx = other.index(f"1.0 + {o_start} chars")
             o_end_idx = other.index(f"1.0 + {o_end} chars")
-            other.tag_remove("sel", "1.0", tk.END)
-            other.tag_add("sel", o_start_idx, o_end_idx)
+            other.tag_remove("paired", "1.0", tk.END)
+            other.tag_add("paired", o_start_idx, o_end_idx)
             other.mark_set("insert", o_start_idx)
             # Scroll both panels to align the blocks at same vertical position
             try:

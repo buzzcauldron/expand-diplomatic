@@ -27,7 +27,7 @@ if python3 -c "import py2app" 2>/dev/null; then
     echo "Using py2app..."
     
     # Create setup.py for py2app
-    cat > "$PROJECT_ROOT/setup_app.py" <<'EOF'
+    cat > "$PROJECT_ROOT/setup_app.py" <<EOF
 from setuptools import setup
 
 APP = ['gui.py']
@@ -43,8 +43,8 @@ OPTIONS = {
         'CFBundleName': 'Expand Diplomatic',
         'CFBundleDisplayName': 'Expand Diplomatic',
         'CFBundleIdentifier': 'com.github.halxiii.expand-diplomatic',
-        'CFBundleVersion': '0.2.0',
-        'CFBundleShortVersionString': '0.2.0',
+        'CFBundleVersion': '${VERSION}',
+        'CFBundleShortVersionString': '${VERSION}',
         'NSHumanReadableCopyright': 'Copyright © 2024',
     }
 }
