@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
-# Build Windows MSI installer for expand-diplomatic
-# Requires: Python with cx_Freeze on Windows or WSL2
+# Build Windows MSI installer for expand-diplomatic.
+# Single command: installs Windows build dependencies (requirements.txt + cx_Freeze)
+# then builds the MSI. Requires Python 3.10+ on Windows or WSL2.
 #
 # Usage:
 #   ./scripts/build-windows-msi.sh [--no-clean]
@@ -35,16 +36,20 @@ case "$(uname -s)" in
         ;;
 esac
 
+# Install Windows build dependencies (single-command: deps + build)
+echo "Installing Windows build dependencies..."
+python -m pip install --upgrade pip -q
+python -m pip install -r "$PROJECT_ROOT/requirements.txt" -q
+if ! python -c "import cx_Freeze" 2>/dev/null; then
+    echo "Installing cx_Freeze..."
+    python -m pip install --upgrade cx_Freeze
+fi
+echo "Dependencies OK."
+
 # Clean previous builds unless --no-clean
 if [[ "$1" != "--no-clean" ]]; then
     echo "Cleaning previous builds..."
     rm -rf "$BUILD_DIR" "$DIST_DIR"/*.msi
-fi
-
-# Ensure cx_Freeze is installed
-if ! python -c "import cx_Freeze" 2>/dev/null; then
-    echo "Installing cx_Freeze..."
-    python -m pip install --upgrade cx_Freeze
 fi
 
 # Create .ico from .png if needed (Windows requires .ico for exe/installer)

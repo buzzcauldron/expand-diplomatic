@@ -86,14 +86,14 @@ sudo yum install rpmbuild/RPMS/noarch/expand-diplomatic-*.rpm
 
 **Script:** `./scripts/build-windows-msi.sh`
 
-**Requires:**
-- Python 3.10+ with `cx_Freeze`
-- Windows or WSL2
-
-**Install requirements:**
+**Single command** (installs Windows build dependencies and builds the MSI):
 ```bash
-pip install cx_Freeze
+./scripts/build-windows-msi.sh
 ```
+The script installs `requirements.txt` and `cx_Freeze` via pip, then builds the installer. You only need Python 3.10+ on Windows or WSL2.
+
+**Requires:**
+- Python 3.10+ (Windows or WSL2 with Windows Python for MSI)
 
 **Output:**
 - `dist/expand-diplomatic-*.msi`
