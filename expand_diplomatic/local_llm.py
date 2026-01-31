@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import unicodedata
 import urllib.error
 import urllib.request
@@ -46,9 +47,14 @@ def run_local_rules(
         return text
     out = unicodedata.normalize("NFC", text)
     for d, f in pairs:
-        if not d:
-            continue
-        out = out.replace(d, f)
+        if not d or not f:
+            continue  # skip invalid pairs; never replace with empty (preserve accuracy)
+        # If d is a prefix of f (e.g. "gra" in "gratia"), avoid replacing inside f
+        if len(f) > len(d) and f.startswith(d):
+            suffix = f[len(d):]
+            out = re.sub(re.escape(d) + "(?!" + re.escape(suffix) + ")", f, out)
+        else:
+            out = out.replace(d, f)
     return out
 
 
@@ -107,8 +113,9 @@ def run_local(
 ) -> str:
     """
     Try Ollama first; if unreachable, fall back to rule-based expansion using examples.
-    Training examples are always applied as a final pass so they override model guesses
-    (any diplomatic form in the output is replaced by the canonical example).
+    The prompt includes training pairs so the model can learn from them. Training pairs
+    are then applied as ground truth to the model output: any diplomatic form from the
+    pairs in the output is replaced by the canonical Full form (model guesses overridden).
     sorted_pairs: optional pre-sorted (dip, full) to avoid per-block sort.
     high_end_gpu: when True, use larger context for Ollama (aggressive local training).
     """
@@ -119,5 +126,5 @@ def run_local(
         )
     except RuntimeError:
         return run_local_rules(text, examples=examples, sorted_pairs=sorted_pairs)
-    # Apply training examples as correct overlay: override any diplomatic forms in model output
+    # Ground truth: training pairs override any diplomatic form left in model output
     return run_local_rules(raw, examples=examples, sorted_pairs=sorted_pairs)
