@@ -37,12 +37,28 @@ fi
 # Ensure cx_Freeze is installed
 python -c "import cx_Freeze" 2>/dev/null || { python -m pip install -q cx_Freeze; }
 
+# Create .ico from .png if needed (Windows prefers .ico for exe icon)
+ICON_ICO="$PROJECT_ROOT/stretch_armstrong_icon.ico"
+if [[ ! -f "$ICON_ICO" ]] && [[ -f "$PROJECT_ROOT/stretch_armstrong_icon.png" ]]; then
+    echo "Converting icon to .ico..."
+    python -c "
+from pathlib import Path
+from PIL import Image
+png = Path('stretch_armstrong_icon.png')
+ico = Path('stretch_armstrong_icon.ico')
+img = Image.open(png)
+if img.mode != 'RGBA':
+    img = img.convert('RGBA')
+img.save(ico, format='ICO')
+" 2>/dev/null || true
+fi
+
 # Build exe only (no MSI) - create setup and run build_exe
 cat > "$PROJECT_ROOT/setup_zip.py" << 'SETUP_EOF'
 from pathlib import Path
 from cx_Freeze import setup, Executable
 
-version = "0.2.0"
+version = "0.3.0"
 vfile = Path("expand_diplomatic/_version.py")
 if vfile.exists():
     for line in vfile.read_text().splitlines():
@@ -51,8 +67,8 @@ if vfile.exists():
             break
 
 build_opts = {
-    "packages": ["expand_diplomatic", "google.genai", "lxml", "dotenv", "requests", "PIL", "tkinter"],
-    "includes": ["tkinter", "tkinter.ttk", "tkinter.scrolledtext", "tkinter.filedialog", "tkinter.messagebox"],
+    "packages": ["expand_diplomatic", "google.genai", "google.genai.types", "lxml", "dotenv", "requests", "PIL", "tkinter"],
+    "includes": ["tkinter", "tkinter.ttk", "tkinter.scrolledtext", "tkinter.filedialog", "tkinter.messagebox", "run_gemini"],
     "include_files": [
         ("examples.json", "examples.json"),
         (".env.example", ".env.example"),
@@ -69,13 +85,21 @@ setup(
     options={"build_exe": build_opts},
     executables=[
         Executable("gui.py", base="Win32GUI", target_name="expand-diplomatic-gui.exe",
-                   icon="stretch_armstrong_icon.png" if Path("stretch_armstrong_icon.png").exists() else None),
-        Executable("expand_diplomatic/__main__.py", base=None, target_name="expand-diplomatic.exe"),
+                   icon="stretch_armstrong_icon.ico" if Path("stretch_armstrong_icon.ico").exists() else
+                   ("stretch_armstrong_icon.png" if Path("stretch_armstrong_icon.png").exists() else None)),
+        Executable("expand_diplomatic/__main__.py", base=None, target_name="expand-diplomatic.exe",
+                   icon="stretch_armstrong_icon.ico" if Path("stretch_armstrong_icon.ico").exists() else
+                   ("stretch_armstrong_icon.png" if Path("stretch_armstrong_icon.png").exists() else None)),
     ],
 )
 SETUP_EOF
 
-python setup_zip.py build_exe
+# On WSL2, use Windows Python if available
+if grep -qi microsoft /proc/version 2>/dev/null && command -v python.exe &>/dev/null; then
+    python.exe setup_zip.py build_exe
+else
+    python setup_zip.py build_exe
+fi
 rm -f "$PROJECT_ROOT/setup_zip.py"
 
 # Find the exe output dir (e.g. build/exe.win-amd64-3.12)
