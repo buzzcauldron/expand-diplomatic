@@ -252,17 +252,21 @@ You can build a **portable ZIP** that contains ready-to-run `.exe` files. No MSI
   The build must run on **Windows** or **WSL2** (Windows Subsystem for Linux), because it produces Windows executables. Use Python 3.10+ in that environment.
 
 - **How to build the portable ZIP**  
-  In the project folder, on Windows (e.g. in PowerShell or Git Bash) or in WSL2:
+  **On Windows (Command Prompt or PowerShell):** run the `.bat` wrapper so Git (bash) is detected or installed first:
+  ```bat
+  scripts\build-windows-zip.bat
+  ```
+  The `.bat` looks for Git for Windows (bash). If it’s missing, it tries to install it via `winget`; otherwise it tells you to install from [git-scm.com](https://git-scm.com/download/win). **Do not double‑click the `.sh` file**—Windows may open it in an editor. Use the `.bat` or, in **Git Bash** or **WSL2**, run:
   ```bash
   ./scripts/build-windows-zip.sh
   ```
-  The script installs `requirements.txt` and `cx_Freeze` if needed, then builds the exes and packs them into **`dist/expand-diplomatic-portable.zip`**.
+  The build script installs `requirements.txt` and `cx_Freeze` if needed, then produces **`dist/expand-diplomatic-portable.zip`**.
 
 - **Using the ZIP**  
   Copy `expand-diplomatic-portable.zip` to any Windows machine. Extract it to a folder (e.g. `C:\Tools\expand-diplomatic`). The contents appear directly in that folder (no extra subfolder). Double‑click **`expand-diplomatic-gui.exe`** to start the GUI, or run **`expand-diplomatic.exe`** from a command prompt for the CLI. No Python or installer is required on that machine.
 
 - **Optional: MSI installer**  
-  If you need a traditional installer (Start Menu, Add/Remove Programs), use `./scripts/build-windows-msi.sh`. The MSI build is more environment-dependent; if it fails, use the portable ZIP build above. See [Building and Packaging](docs/BUILDING.md) for details.
+  If you need a traditional installer (Start Menu, Add/Remove Programs), run **`scripts\build-windows-msi.bat`** on Windows (same Git/bash behaviour as above), or `./scripts/build-windows-msi.sh` in Git Bash or WSL2. The MSI build is more environment-dependent; if it fails, use the portable ZIP build above. See [Building and Packaging](docs/BUILDING.md) for details.
 
 - **Antivirus or “Windows protected your PC”**  
   The built `.exe` files are not signed. Windows or antivirus may warn the first time you run them. You can choose “More info” → “Run anyway” or add an exception for the folder where you extracted the ZIP.
@@ -309,8 +313,8 @@ Build native packages for different platforms:
 
 ### Windows executable (portable ZIP recommended)
 See the **Windows** section above for full explanation. Summary:
-- **Portable ZIP (recommended):** `./scripts/build-windows-zip.sh` — one command on Windows or WSL2; installs deps and builds `dist/expand-diplomatic-portable.zip`. Extract on Windows and run `expand-diplomatic-gui.exe` or `expand-diplomatic.exe`. No installer.
-- **MSI (optional):** `./scripts/build-windows-msi.sh` — produces an installer plus the same portable ZIP; more environment-dependent. If MSI fails, use the ZIP build.
+- **Portable ZIP (recommended):** On Windows (cmd/PowerShell) run **`scripts\build-windows-zip.bat`** (detects/installs Git); in Git Bash or WSL2 run `./scripts/build-windows-zip.sh`. Builds `dist/expand-diplomatic-portable.zip`. Extract on Windows and run `expand-diplomatic-gui.exe` or `expand-diplomatic.exe`. No installer.
+- **MSI (optional):** On Windows run **`scripts\build-windows-msi.bat`**, or in Git Bash/WSL2 run `./scripts/build-windows-msi.sh`. Produces an installer plus the same portable ZIP; more environment-dependent. If MSI fails, use the ZIP build.
 
 ### RPM (Red Hat, Fedora, CentOS, Rocky Linux)
 ```bash
