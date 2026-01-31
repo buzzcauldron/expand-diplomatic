@@ -777,8 +777,8 @@ class App:
         self.root.after(200, self._refresh_models_background)
 
     def _build_toolbar(self) -> None:
-        # Essential row stays visible when window shrinks; rest scrolls horizontally
-        toolbar_wrapper = tk.Frame(self.root)
+        # Top third: toolbar fills width and moves with window resizing; essential row always visible
+        toolbar_wrapper = tk.Frame(self.root, relief=tk.FLAT, bd=0)
         toolbar_wrapper.pack(side=tk.TOP, fill=tk.X, padx=2, pady=2)
         pad = dict(padx=2, pady=2)
         opts = {"font": ("", 9), "takefocus": True}
@@ -910,10 +910,13 @@ class App:
         self._update_toolbar_scroll()
 
     def _update_toolbar_scroll(self) -> None:
-        """Update toolbar scroll region and canvas window size so horizontal scroll works when narrow."""
+        """Update toolbar scroll region and canvas window size so top third moves with window resizing.
+        When narrow: horizontal scroll; when wide: canvas window fills viewport so toolbar uses full width."""
         self._toolbar_frame.update_idletasks()
-        w = self._toolbar_frame.winfo_reqwidth()
+        req_w = self._toolbar_frame.winfo_reqwidth()
         h = self._toolbar_frame.winfo_reqheight()
+        canvas_w = max(1, self._toolbar_canvas.winfo_width() or 400)
+        w = max(req_w, canvas_w)
         self._toolbar_canvas.configure(scrollregion=(0, 0, w, h))
         self._toolbar_canvas.itemconfig(self._toolbar_canvas_window, width=w, height=h)
         self._toolbar_canvas.configure(height=min(h, 120))
@@ -1244,13 +1247,13 @@ class App:
         self._queue_label.grid(row=0, column=4, sticky=tk.W, padx=(2, 2), pady=2)
         # Clear queue button (only visible when queue has items)
         self._clear_queue_btn = tk.Button(
-            status_frame, text="Clear Q", command=self._clear_queue, width=6, font=("", 8)
+            status_frame, text="Clear Q", command=self._clear_queue, width=6, font=("", 9)
         )
         self._clear_queue_btn.grid(row=0, column=5, padx=(2, 2), pady=2)
         self._clear_queue_btn.grid_remove()  # Hidden by default
         # Cancel button
         self.cancel_btn = tk.Button(
-            status_frame, text="Cancel", command=self._on_cancel_expand, state=tk.DISABLED
+            status_frame, text="Cancel", command=self._on_cancel_expand, state=tk.DISABLED, font=("", 9)
         )
         self.cancel_btn.grid(row=0, column=6, padx=(2, 4), pady=2)
 
