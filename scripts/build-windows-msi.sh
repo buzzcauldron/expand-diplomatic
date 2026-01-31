@@ -7,6 +7,9 @@
 # Usage:
 #   ./scripts/build-windows-msi.sh [--no-clean]
 #
+# On Windows (Command Prompt/PowerShell): run scripts\build-windows-msi.bat instead.
+# Do not double-click this .sh file—Windows may open it in an editor. Use the .bat.
+#
 
 set -e
 

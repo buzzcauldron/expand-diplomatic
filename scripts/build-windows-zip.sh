@@ -5,6 +5,9 @@
 # Contents are at ZIP root so extracting does NOT create a subfolder.
 #
 # Usage: ./scripts/build-windows-zip.sh [--no-clean]
+#
+# On Windows (Command Prompt/PowerShell): run scripts\build-windows-zip.bat instead.
+# Do not double-click this .sh file—Windows may open it in an editor. Use the .bat.
 
 set -e
 

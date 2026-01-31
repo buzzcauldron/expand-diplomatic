@@ -86,13 +86,17 @@ sudo yum install rpmbuild/RPMS/noarch/expand-diplomatic-*.rpm
 
 **Easiest:** Build a portable ZIP — no MSI, no installer. Extract on Windows and run the exe.
 
-**Script:** `./scripts/build-windows-zip.sh`
+**On Windows (Command Prompt or PowerShell):** run the `.bat` wrapper so Git (bash) is detected or installed before running the build:
+```bat
+scripts\build-windows-zip.bat
+```
+The `.bat` looks for Git for Windows (bash). If missing, it tries `winget install Git.Git`; otherwise it tells you to install from [git-scm.com/download/win](https://git-scm.com/download/win). If Git is installed but you see an error, **do not double‑click the `.sh` file**—Windows may open it in an editor. Run the `.bat` instead, or open **Git Bash**, `cd` to the project folder, and run `./scripts/build-windows-zip.sh`.
 
-**Single command:**
+**In Git Bash or WSL2:**
 ```bash
 ./scripts/build-windows-zip.sh
 ```
-Installs `requirements.txt` and `cx_Freeze`, then builds a ZIP. Extract it on Windows; run `expand-diplomatic-gui.exe`. You only need Python 3.10+ on Windows or WSL2.
+Installs `requirements.txt` and `cx_Freeze`, then builds a ZIP. You need Python 3.10+ on Windows or WSL2.
 
 **Output:** `dist/expand-diplomatic-portable.zip` (flat — extract puts files at the folder root, no subfolder)
 
@@ -102,14 +106,14 @@ Installs `requirements.txt` and `cx_Freeze`, then builds a ZIP. Extract it on Wi
 
 ### Windows MSI Installer (optional)
 
-**Script:** `./scripts/build-windows-msi.sh`
+**On Windows (Command Prompt or PowerShell):** run **`scripts\build-windows-msi.bat`** (same Git/bash detection and install as the portable ZIP build above; do not double‑click the `.sh` file).
 
-Builds an MSI installer (Start Menu, PATH, Add/Remove Programs). More steps and environment-dependent; if it fails, use the portable ZIP build above instead.
-
-**Single command:**
+**In Git Bash or WSL2:**
 ```bash
 ./scripts/build-windows-msi.sh
 ```
+
+Builds an MSI installer (Start Menu, PATH, Add/Remove Programs). More steps and environment-dependent; if it fails, use the portable ZIP build above instead.
 
 **Output:**
 - `dist/expand-diplomatic-*.msi`
@@ -119,12 +123,7 @@ Builds an MSI installer (Start Menu, PATH, Add/Remove Programs). More steps and 
 
 **MSI troubleshooting:** If MSI build or install fails, use `./scripts/build-windows-zip.sh` to get a portable ZIP instead. For MSI logs: `msiexec -i file.msi -l*vx msi_log.txt`.
 
-**Portable ZIP only** (same as recommended above):
-```bash
-./scripts/build-windows-zip.sh
-# Or: ./scripts/build-all.sh --zip
-# Output: dist/expand-diplomatic-portable.zip — flat structure, no subfolder when extracted
-```
+**Portable ZIP only** (same as recommended above): on Windows run **`scripts\build-windows-zip.bat`**, or in Git Bash/WSL2 run `./scripts/build-windows-zip.sh`. Or: `./scripts/build-all.sh --zip`. Output: `dist/expand-diplomatic-portable.zip` — flat structure, no subfolder when extracted.
 
 ---
 
