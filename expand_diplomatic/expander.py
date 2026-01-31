@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import unicodedata
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Callable
@@ -577,7 +578,7 @@ def _expand_once(
         )
         if backend == "local" and examples:
             sorted_pairs = sorted(
-                [(ex["diplomatic"], ex["full"]) for ex in examples],
+                [(unicodedata.normalize("NFC", ex["diplomatic"]), ex["full"]) for ex in examples],
                 key=lambda p: len(p[0]),
                 reverse=True,
             )

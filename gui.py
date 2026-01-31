@@ -771,9 +771,21 @@ class App:
         self.root.after(200, self._refresh_models_background)
 
     def _build_toolbar(self) -> None:
-        bar = tk.Frame(self.root, relief=tk.RAISED, bd=1)
+        # Wrapper: canvas + horizontal scrollbar so toolbar reflows (scrolls) when window is narrow
+        toolbar_wrapper = tk.Frame(self.root)
+        toolbar_wrapper.pack(side=tk.TOP, fill=tk.X, padx=2, pady=2)
+        self._toolbar_canvas = tk.Canvas(toolbar_wrapper, highlightthickness=0, height=70)
+        self._toolbar_scrollbar = tk.Scrollbar(toolbar_wrapper, orient=tk.HORIZONTAL, command=self._toolbar_canvas.xview)
+        self._toolbar_canvas.configure(xscrollcommand=self._toolbar_scrollbar.set)
+        self._toolbar_canvas.pack(side=tk.TOP, fill=tk.X)
+        self._toolbar_scrollbar.pack(side=tk.BOTTOM, fill=tk.X)
+        bar = tk.Frame(self._toolbar_canvas, relief=tk.RAISED, bd=1)
         self._toolbar_frame = bar
-        bar.pack(side=tk.TOP, fill=tk.X, padx=2, pady=2)
+        self._toolbar_canvas_window = self._toolbar_canvas.create_window(0, 0, window=bar, anchor=tk.NW)
+        self._toolbar_canvas.bind("<Configure>", self._on_toolbar_canvas_configure)
+        bar.bind("<Configure>", lambda e: self._schedule_toolbar_scroll())
+        self._toolbar_scroll_after_id: str | None = None
+        self.root.after(50, self._update_toolbar_scroll)
         pad = dict(padx=1, pady=1)
         opts = {"font": ("", 8), "takefocus": True}
         # Row 0: Primary actions
@@ -870,25 +882,49 @@ class App:
         self.root.bind("<Control-Right>", lambda e: (self._on_next_file(), "break")[1])
         self._on_backend_change(self.backend_var.get())
 
+    def _on_toolbar_canvas_configure(self, event: tk.Event) -> None:
+        """Schedule toolbar scroll update (throttled) so resize doesn't hammer layout."""
+        self._schedule_toolbar_scroll()
+
+    def _schedule_toolbar_scroll(self) -> None:
+        """Throttle: run _update_toolbar_scroll once after 50 ms of no resize."""
+        if self._toolbar_scroll_after_id is not None:
+            self.root.after_cancel(self._toolbar_scroll_after_id)
+        self._toolbar_scroll_after_id = self.root.after(50, self._do_toolbar_scroll)
+
+    def _do_toolbar_scroll(self) -> None:
+        self._toolbar_scroll_after_id = None
+        self._update_toolbar_scroll()
+
+    def _update_toolbar_scroll(self) -> None:
+        """Update toolbar scroll region and canvas window size so horizontal scroll works when narrow."""
+        self._toolbar_frame.update_idletasks()
+        w = self._toolbar_frame.winfo_reqwidth()
+        h = self._toolbar_frame.winfo_reqheight()
+        self._toolbar_canvas.configure(scrollregion=(0, 0, w, h))
+        self._toolbar_canvas.itemconfig(self._toolbar_canvas_window, width=w, height=h)
+        self._toolbar_canvas.configure(height=min(h, 120))
+
     def _on_backend_change(self, backend: str) -> None:
         """Show or hide Gemini model dropdown; when local+GPU, suggest higher Parallel."""
-        if backend.strip().lower() == "local":
+        is_local = backend.strip().lower() == "local"
+        if is_local:
             self._model_label.grid_remove()
             self._model_menu.grid_remove()
-            if self._high_end_gpu and hasattr(self, "_concurrent_spinbox"):
+            if self._high_end_gpu:
                 self.concurrent_var.set("12")
                 self._concurrent_spinbox.configure(to=16)
         else:
             self._model_label.grid()
             self._model_menu.grid()
-            if hasattr(self, "_concurrent_spinbox"):
-                self._concurrent_spinbox.configure(to=8)
-                try:
-                    v = int(self.concurrent_var.get().strip() or "2")
-                    if v > 8:
-                        self.concurrent_var.set("8")
-                except ValueError:
-                    self.concurrent_var.set("2")
+            self._concurrent_spinbox.configure(to=8)
+            try:
+                v = int(self.concurrent_var.get().strip() or "2")
+                if v > 8:
+                    self.concurrent_var.set("8")
+            except ValueError:
+                self.concurrent_var.set("2")
+        self.root.after(10, self._update_toolbar_scroll)
 
     def _build_main(self) -> None:
         panes = tk.Frame(self.root)
@@ -1158,7 +1194,8 @@ class App:
         search_row.pack(fill=tk.X, padx=2, pady=(0, 2))
         tk.Label(search_row, text="Search:").pack(side=tk.LEFT, padx=(0, 4), pady=2)
         self._train_search_var = tk.StringVar()
-        self._train_search_var.trace_add("write", lambda *a: self._refresh_train_list())
+        self._train_refresh_after_id: str | None = None
+        self._train_search_var.trace_add("write", self._schedule_train_refresh)
         search_entry = tk.Entry(search_row, textvariable=self._train_search_var, width=24)
         search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2, pady=2)
         tk.Button(search_row, text="✕", width=2, command=lambda: self._train_search_var.set("")).pack(side=tk.LEFT, padx=2, pady=2)
@@ -1975,6 +2012,16 @@ class App:
             self.examples_var.set(path)
             self.last_dir = Path(path).parent
             self._refresh_train_list()
+
+    def _schedule_train_refresh(self, *args: object) -> None:
+        """Debounce Train list refresh so search typing doesn't reload on every keystroke."""
+        if self._train_refresh_after_id is not None:
+            self.root.after_cancel(self._train_refresh_after_id)
+        self._train_refresh_after_id = self.root.after(150, self._do_train_refresh)
+
+    def _do_train_refresh(self) -> None:
+        self._train_refresh_after_id = None
+        self._refresh_train_list()
 
     def _refresh_train_list(self) -> None:
         p = Path(self.examples_var.get().strip() or str(DEFAULT_EXAMPLES))

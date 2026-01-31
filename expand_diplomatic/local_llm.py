@@ -35,10 +35,10 @@ def run_local_rules(
     if not text or not text.strip():
         return text
     if sorted_pairs is not None:
-        pairs = sorted_pairs
+        pairs = sorted_pairs  # caller supplies (d_nfc, full) so no per-call normalize
     elif examples:
         pairs = sorted(
-            [(ex["diplomatic"], ex["full"]) for ex in examples],
+            [(unicodedata.normalize("NFC", ex["diplomatic"]), ex["full"]) for ex in examples],
             key=lambda p: len(p[0]),
             reverse=True,
         )
@@ -48,8 +48,7 @@ def run_local_rules(
     for d, f in pairs:
         if not d:
             continue
-        d_nfc = unicodedata.normalize("NFC", d)
-        out = out.replace(d_nfc, f)
+        out = out.replace(d, f)
     return out
 
 
