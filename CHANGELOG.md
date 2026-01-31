@@ -6,6 +6,21 @@ The project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ## [Unreleased]
 
+## [0.3.1] - 2025-01-30
+
+### Added
+
+- Search filter for Train (examples) list: type in Search box to filter pairs by diplomatic or full text; shows "N of M pairs" when filtered
+
+### Changed
+
+- Image panel moved from side to top of window (horizontal strip when collapsed)
+- Rule-based expansion: text and diplomatic keys normalized to NFC so forms like gratia and et cetera match regardless of Unicode encoding (e.g. NFD `grã` vs precomposed `grã`)
+
+### Fixed
+
+- gratia / et cetera not expanding when source used different Unicode form (NFC/NFD); rules now normalize before replace
+
 ## [0.3.0] - 2026-01-30
 
 ### Added
