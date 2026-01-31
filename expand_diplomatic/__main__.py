@@ -247,15 +247,25 @@ def _run_expand(args: argparse.Namespace) -> None:
     out_dir = args.out_dir
     parallel_files = max(1, min(16, getattr(args, "parallel_files", 1) or 1))
 
+    def _is_timeout(e: BaseException) -> bool:
+        if isinstance(e, TimeoutError):
+            return True
+        s = str(e).lower()
+        return "timeout" in s or "timed out" in s
+
     def process_file(f: Path) -> tuple[Path, bool, str]:
-        """Process one file, return (path, success, message)."""
-        try:
-            xml = f.read_text(encoding="utf-8")
-            out_path = (out_dir / f"{f.stem}_expanded.xml") if out_dir else (f.parent / f"{f.stem}_expanded.xml")
-            run(xml, out_path, fpath=f, files_api=args.files_api)
-            return (f, True, f"OK: {f.name}")
-        except Exception as e:
-            return (f, False, f"FAIL: {f.name}: {e}")
+        """Process one file, return (path, success, message). Retries on timeout."""
+        xml = f.read_text(encoding="utf-8")
+        out_path = (out_dir / f"{f.stem}_expanded.xml") if out_dir else (f.parent / f"{f.stem}_expanded.xml")
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            try:
+                run(xml, out_path, fpath=f, files_api=args.files_api)
+                return (f, True, f"OK: {f.name}")
+            except Exception as e:
+                if _is_timeout(e) and attempt < max_attempts - 1:
+                    continue
+                return (f, False, f"FAIL: {f.name}: {e}")
 
     if parallel_files <= 1:
         # Sequential
