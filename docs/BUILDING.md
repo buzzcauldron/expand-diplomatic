@@ -82,42 +82,44 @@ sudo yum install rpmbuild/RPMS/noarch/expand-diplomatic-*.rpm
 
 ---
 
-### Windows MSI Installer
+### Windows executable (recommended: portable ZIP)
+
+**Easiest:** Build a portable ZIP — no MSI, no installer. Extract on Windows and run the exe.
+
+**Script:** `./scripts/build-windows-zip.sh`
+
+**Single command:**
+```bash
+./scripts/build-windows-zip.sh
+```
+Installs `requirements.txt` and `cx_Freeze`, then builds a ZIP. Extract it on Windows; run `expand-diplomatic-gui.exe`. You only need Python 3.10+ on Windows or WSL2.
+
+**Output:** `dist/expand-diplomatic-portable.zip` (flat — extract puts files at the folder root, no subfolder)
+
+**Use:** Copy the ZIP to a Windows machine, extract, run `expand-diplomatic-gui.exe` or `expand-diplomatic.exe`.
+
+---
+
+### Windows MSI Installer (optional)
 
 **Script:** `./scripts/build-windows-msi.sh`
 
-**Single command** (installs Windows build dependencies and builds the MSI):
+Builds an MSI installer (Start Menu, PATH, Add/Remove Programs). More steps and environment-dependent; if it fails, use the portable ZIP build above instead.
+
+**Single command:**
 ```bash
 ./scripts/build-windows-msi.sh
 ```
-The script installs `requirements.txt` and `cx_Freeze` via pip, then builds the installer. You only need Python 3.10+ on Windows or WSL2.
-
-**Requires:**
-- Python 3.10+ (Windows or WSL2 with Windows Python for MSI)
 
 **Output:**
 - `dist/expand-diplomatic-*.msi`
-- `dist/expand-diplomatic-portable.zip` (flat — extract puts files directly in folder, no subfolder)
+- `dist/expand-diplomatic-portable.zip` (also produced by this script)
 
-**Install:**
-```bash
-# MSI: Interactive install (double-click) or: msiexec /i expand-diplomatic-*.msi /qn
-# Portable ZIP: Extract to any folder; run expand-diplomatic-gui.exe
-```
+**Install:** Double-click MSI or `msiexec /i expand-diplomatic-*.msi /qn`
 
-**Features:**
-- GUI launcher: "Expand Diplomatic" in Start Menu
-- CLI: `expand-diplomatic.exe` added to PATH
-- Includes all dependencies (Python runtime, libraries, examples)
-- Uninstall via Windows Settings → Apps
+**MSI troubleshooting:** If MSI build or install fails, use `./scripts/build-windows-zip.sh` to get a portable ZIP instead. For MSI logs: `msiexec -i file.msi -l*vx msi_log.txt`.
 
-**Platforms:** Windows 10/11 (x64, arm64)
-
-**WSL2:** Use Windows Python: `python.exe setup_msi.py bdist_msi` from the project dir. Or run the build on native Windows.
-
-**MSI troubleshooting:** If install fails, run `msiexec -i file.msi -l*vx msi_log.txt` to capture a log. Common fixes: use Windows Python (not WSL Linux Python), ensure icon is .ico (script auto-converts .png).
-
-**Portable ZIP only** (no MSI):
+**Portable ZIP only** (same as recommended above):
 ```bash
 ./scripts/build-windows-zip.sh
 # Or: ./scripts/build-all.sh --zip
