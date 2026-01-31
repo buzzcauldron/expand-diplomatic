@@ -1196,8 +1196,8 @@ class App:
         self._train_search_var = tk.StringVar()
         self._train_refresh_after_id: str | None = None
         self._train_search_var.trace_add("write", self._schedule_train_refresh)
-        search_entry = tk.Entry(search_row, textvariable=self._train_search_var, width=24)
-        search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2, pady=2)
+        search_entry = tk.Entry(search_row, textvariable=self._train_search_var, width=14)
+        search_entry.pack(side=tk.LEFT, padx=2, pady=2)
         tk.Button(search_row, text="✕", width=2, command=lambda: self._train_search_var.set("")).pack(side=tk.LEFT, padx=2, pady=2)
         self.train_list = scrolledtext.ScrolledText(tr, height=3, wrap=tk.WORD, state=tk.DISABLED, font=self._font_sm)
         self.train_list.pack(fill=tk.X, padx=2, pady=2)
