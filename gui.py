@@ -782,11 +782,12 @@ class App:
         toolbar_wrapper.pack(side=tk.TOP, fill=tk.X, padx=2, pady=2)
         pad = dict(padx=2, pady=2)
         opts = {"font": ("", 9), "takefocus": True}
-        # Essential row (fixed): Open, Expand, Re-expand, Save, prev/next — always visible
+        # Essential row (fixed): Open, Batch, Expand, Re-expand, Save, prev/next — always visible
         essential_row = tk.Frame(toolbar_wrapper, relief=tk.FLAT, bd=0)
         essential_row.pack(side=tk.TOP, fill=tk.X)
         for w in [
             (tk.Button, "Open", self._on_open, {"width": 4}),
+            (tk.Button, "Batch…", self._on_batch, {"width": 6}),
             (tk.Button, "Expand", self._on_expand, {"width": 5}),
             (tk.Button, "Re-expand", self._on_reexpand, {"width": 8}),
             (tk.Button, "Save", self._on_save, {"width": 4}),
@@ -811,11 +812,10 @@ class App:
         bar.bind("<Configure>", lambda e: self._schedule_toolbar_scroll())
         self._toolbar_scroll_after_id: str | None = None
         self.root.after(50, self._update_toolbar_scroll)
-        # Row 0: Secondary actions (Batch, export, Diff)
+        # Row 0: Secondary actions (export, Diff)
         r1 = tk.Frame(bar)
         r1.pack(side=tk.TOP, fill=tk.X)
         for w in [
-            (tk.Button, "Batch…", self._on_batch, {"width": 6}),
             (tk.Button, "In→TXT", self._on_save_input_txt, {"width": 5}),
             (tk.Button, "Out→TXT", self._on_save_output_txt, {"width": 6}),
             (tk.Button, "Diff", self._on_diff, {"width": 4}),
@@ -1545,7 +1545,25 @@ class App:
             self._restart_with_block_by_block = True
 
     def _on_reexpand(self) -> None:
-        """Re-expand from original file; show original on left, new result on right. Uses updated examples+learned."""
+        """Re-expand from original (single file) or re-run batch on same file list. Uses updated examples+learned."""
+        # If batch list is visible, Re-expand = re-run batch on those files
+        if getattr(self, "_batch_files", None) and len(self._batch_files) > 0:
+            if self.expand_running:
+                messagebox.showwarning("Re-expand", "Expansion in progress. Cancel or wait, then try Re-expand.")
+                return
+            try:
+                parallel = int(self.concurrent_var.get().strip() or "2")
+                parallel = max(1, min(8, parallel))
+            except ValueError:
+                parallel = 2
+            model = self.gemini_model_var.get() if (self.backend_var.get() or "").strip() == "gemini" else ""
+            if (self.backend_var.get() or "").strip() == "gemini" and "pro" in (model or "").lower():
+                parallel = min(parallel, 2)
+            self._batch_status = {f.name: "pending" for f in self._batch_files}
+            self._update_batch_list()
+            self._run_batch(self._batch_files, parallel)
+            return
+
         xml = getattr(self, "original_input", "") or ""
         if not xml.strip():
             messagebox.showwarning("Re-expand", "No original. Open a file or run Expand first.")
@@ -1560,12 +1578,12 @@ class App:
         if backend == "gemini" and not api_key:
             _show_api_error_dialog(self, "No API key set.", xml, is_retry=False)
             return
-        
+
         # If expansion is running, add to queue (no toggle for re-expand)
         if self.expand_running:
             self._add_to_queue(xml, api_key, backend, self.last_input_path)
             return
-        
+
         _run_expand_internal(self, xml, api_key, backend, retry=False)
 
     def _add_to_queue(self, xml: str, api_key: str | None, backend: str, path: Path | None = None) -> None:
