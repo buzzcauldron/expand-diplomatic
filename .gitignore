@@ -3,6 +3,9 @@
 .env.*
 !.env.example
 
+# macOS
+.DS_Store
+
 # Virtualenv and cache
 .venv/
 __pycache__/
