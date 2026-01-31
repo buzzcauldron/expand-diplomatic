@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "expand-diplomatic"
-version = "0.3.2"
+version = "0.3.3"
 description = "Expand diplomatic transcriptions to full form via Gemini API"
 # Semantic Versioning: https://semver.org — keep in sync with expand_diplomatic/_version.py
 readme = "README.md"

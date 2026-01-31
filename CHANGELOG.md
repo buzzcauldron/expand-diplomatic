@@ -6,6 +6,16 @@ The project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ## [Unreleased]
 
+## [0.3.3] - 2025-01-30
+
+### Added
+
+- **Windows .bat wrappers**: `scripts/build-windows-zip.bat` and `scripts/build-windows-msi.bat` for Command Prompt/PowerShell. Detect Git for Windows (bash); if missing, attempt `winget install Git.Git` or prompt to install from git-scm.com. Clear error if user double-clicks a `.sh` file (tell them to run the `.bat` or use Git Bash).
+
+### Changed
+
+- **Windows build docs**: README and BUILDING.md recommend running `scripts\build-windows-zip.bat` (and MSI `.bat`) on Windows instead of `.sh`; warn not to double-click `.sh` files. `.sh` script headers note to use the `.bat` on Windows.
+
 ## [0.3.2] - 2025-01-30
 
 ### Added
