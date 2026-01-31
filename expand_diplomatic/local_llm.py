@@ -105,14 +105,17 @@ def run_local(
 ) -> str:
     """
     Try Ollama first; if unreachable, fall back to rule-based expansion using examples.
-    Always succeeds when examples are available.
+    Training examples are always applied as a final pass so they override model guesses
+    (any diplomatic form in the output is replaced by the canonical example).
     sorted_pairs: optional pre-sorted (dip, full) to avoid per-block sort.
     high_end_gpu: when True, use larger context for Ollama (aggressive local training).
     """
     try:
-        return run_ollama(
+        raw = run_ollama(
             prompt, model=model, base_url=base_url,
             high_end_gpu=high_end_gpu,
         )
     except RuntimeError:
         return run_local_rules(text, examples=examples, sorted_pairs=sorted_pairs)
+    # Apply training examples as correct overlay: override any diplomatic forms in model output
+    return run_local_rules(raw, examples=examples, sorted_pairs=sorted_pairs)

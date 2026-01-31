@@ -219,25 +219,50 @@ def _expand_worker(
         app.root.after(0, update_ui)
 
     def partial_cb(xml_result: str) -> None:
-        """Display each completed block without scrolling."""
+        """Display each completed block. If user had a block highlighted (double-click), stay there."""
         def update_output() -> None:
-            # Save scroll position
+            out = app.output_txt
+            # If user has synced block, preserve scroll and re-apply highlight after update
+            block_idx = getattr(app, "_synced_block_idx", None)
+            if block_idx is None:
+                # Fallback: get block from paired/sel tag
+                for tag in ("paired", "sel"):
+                    rng = list(out.tag_ranges(tag))
+                    if rng:
+                        try:
+                            pos = str(rng[0])
+                            off = out.count("1.0", pos, "chars")[0]
+                            content = out.get("1.0", tk.END)
+                            ranges = app._get_block_ranges_cached(content)
+                            for i, (s, e) in enumerate(ranges):
+                                if s <= off < e:
+                                    block_idx = i
+                                    break
+                        except Exception:
+                            pass
+                        break
             try:
-                scroll_pos = app.output_txt.yview()
+                scroll_pos = out.yview()
             except Exception:
                 scroll_pos = None
-            
-            # Update content
-            app.output_txt.delete("1.0", tk.END)
-            app.output_txt.insert("1.0", xml_result)
-            
-            # Restore scroll position (don't move page)
+            out.delete("1.0", tk.END)
+            out.insert("1.0", xml_result)
             if scroll_pos is not None:
                 try:
-                    app.output_txt.yview_moveto(scroll_pos[0])
+                    out.yview_moveto(scroll_pos[0])
                 except Exception:
                     pass
-        
+            if block_idx is not None:
+                try:
+                    ranges = app._get_block_ranges_cached(xml_result)
+                    if block_idx < len(ranges):
+                        s, e = ranges[block_idx]
+                        start_idx = out.index(f"1.0 + {s} chars")
+                        end_idx = out.index(f"1.0 + {e} chars")
+                        out.tag_remove("paired", "1.0", tk.END)
+                        out.tag_add("paired", start_idx, end_idx)
+                except Exception:
+                    pass
         app.root.after(0, update_output)
 
     whole_doc = app.whole_document_var.get() if getattr(app, "whole_document_var", None) else False
@@ -301,21 +326,46 @@ def _expand_worker(
             # Process next in queue even on error
             app.root.after(100, lambda: app._process_next_in_queue())
             return
-        # Save scroll position before updating
+        out = app.output_txt
+        block_idx = getattr(app, "_synced_block_idx", None)
+        if block_idx is None:
+            for tag in ("paired", "sel"):
+                rng = list(out.tag_ranges(tag))
+                if rng:
+                    try:
+                        pos = str(rng[0])
+                        off = out.count("1.0", pos, "chars")[0]
+                        content = out.get("1.0", tk.END)
+                        ranges = app._get_block_ranges_cached(content)
+                        for i, (s, e) in enumerate(ranges):
+                            if s <= off < e:
+                                block_idx = i
+                                break
+                    except Exception:
+                        pass
+                    break
         try:
-            scroll_pos = app.output_txt.yview()
+            scroll_pos = out.yview()
         except Exception:
             scroll_pos = None
-        
-        app.output_txt.delete("1.0", tk.END)
-        app.output_txt.insert("1.0", result or "")
+        out.delete("1.0", tk.END)
+        out.insert("1.0", result or "")
         if getattr(app, "last_input_path", None) is not None:
             app.last_output_path = app.last_input_path.parent / f"{app.last_input_path.stem}_expanded.xml"
-        
-        # Restore scroll position (don't move page)
         if scroll_pos is not None:
             try:
-                app.output_txt.yview_moveto(scroll_pos[0])
+                out.yview_moveto(scroll_pos[0])
+            except Exception:
+                pass
+        if block_idx is not None:
+            try:
+                ranges = app._get_block_ranges_cached(result or "")
+                if block_idx < len(ranges):
+                    s, e = ranges[block_idx]
+                    start_idx = out.index(f"1.0 + {s} chars")
+                    end_idx = out.index(f"1.0 + {e} chars")
+                    out.tag_remove("paired", "1.0", tk.END)
+                    out.tag_add("paired", start_idx, end_idx)
             except Exception:
                 pass
         
@@ -707,6 +757,8 @@ class App:
         # Expansion queue
         self._expand_queue: list[dict] = []  # List of {"xml": str, "api_key": str|None, "backend": str, "path": Path|None}
         self._queue_label_var = tk.StringVar(value="")
+        # Block sync: preserve selection when output updates during expansion
+        self._synced_block_idx: int | None = None
 
         self._build_toolbar()
         self._build_main()
@@ -858,6 +910,7 @@ class App:
         self.input_txt.bind("<Double-Button-1>", self._on_panel_double_click)
         self.output_txt.bind("<Double-Button-1>", self._on_panel_double_click)
         self.input_txt.bind("<KeyRelease>", self._on_input_activity)
+        self.output_txt.bind("<KeyRelease>", self._on_input_activity)
 
         # Third panel: image (collapsible, collapsed by default)
         self._image_right = tk.Frame(panes)
@@ -1032,25 +1085,44 @@ class App:
         self.autosave_after_id = self.root.after(self.autosave_idle_ms, do_autosave)
 
     def _do_autosave(self) -> None:
-        """Save input to file when idle. Uses last_input_path or autosave.xml."""
+        """Save input and output to files when idle. Creates new files if none previously saved."""
         if not getattr(self, "autosave_var", None) or not self.autosave_var.get():
             return
         if self.expand_running:
             return
+        base = self._file_dialog_dir()
+        saved: list[str] = []
+        # Input
         xml = self.input_txt.get("1.0", tk.END)
-        if not xml.strip():
-            return
-        path = getattr(self, "last_input_path", None)
-        if path is None:
-            base = self._file_dialog_dir()
-            path = base / "autosave.xml"
-            self.last_input_path = path
-            self.last_dir = base
-        try:
-            path.write_text(xml, encoding="utf-8")
-            _status(self, f"Autosaved {path.name}")
-        except Exception:
-            pass
+        if xml.strip():
+            path = getattr(self, "last_input_path", None)
+            if path is None:
+                path = base / "autosave.xml"
+                self.last_input_path = path
+                self.last_dir = base
+            try:
+                path.write_text(xml, encoding="utf-8")
+                saved.append(path.name)
+            except Exception:
+                pass
+        # Output: create new file if no output path previously saved
+        out_xml = self.output_txt.get("1.0", tk.END)
+        if out_xml.strip():
+            out_path = getattr(self, "last_output_path", None)
+            if out_path is None:
+                if getattr(self, "last_input_path", None) is not None:
+                    out_path = self.last_input_path.parent / f"{self.last_input_path.stem}_expanded.xml"
+                else:
+                    out_path = base / "autosave_expanded.xml"
+                self.last_output_path = out_path
+                self.last_dir = base
+            try:
+                out_path.write_text(out_xml, encoding="utf-8")
+                saved.append(out_path.name)
+            except Exception:
+                pass
+        if saved:
+            _status(self, f"Autosaved {', '.join(saved)}")
 
     def _build_train(self) -> None:
         tr = tk.LabelFrame(self.root, text="Train (add examples)")
@@ -1174,6 +1246,7 @@ class App:
         other.tag_remove("paired", "1.0", tk.END)
         other.tag_add("paired", start_idx, end_idx)
         other.mark_set("insert", start_idx)
+        self._synced_block_idx = block_idx
         # Scroll to align both blocks at same vertical position
         try:
             clicked_line = widget.index(f"@{event.x},{event.y}").split('.')[0]
@@ -1213,6 +1286,7 @@ class App:
             other.tag_remove("paired", "1.0", tk.END)
             other.tag_add("paired", o_start_idx, o_end_idx)
             other.mark_set("insert", o_start_idx)
+            self._synced_block_idx = block_idx
             # Scroll both panels to align the blocks at same vertical position
             try:
                 clicked_line = start_idx.split('.')[0]
@@ -1330,6 +1404,7 @@ class App:
 
     def _load_expanded_if_exists(self, input_path: Path) -> None:
         """Clear output panel; if <stem>_expanded.xml exists, load it."""
+        self._synced_block_idx = None
         self.output_txt.delete("1.0", tk.END)
         self.last_output_path = None
         expanded_path = input_path.parent / f"{input_path.stem}_expanded.xml"
