@@ -120,10 +120,13 @@ def add_learned_pairs(
     *,
     max_learned: int = DEFAULT_MAX_LEARNED,
     model: str | None = None,
+    local_diplomatic: set[str] | None = None,
 ) -> int:
     """
     Append new pairs to learned file. Dedupes by diplomatic text.
     Weights toward Pro model: pro-derived pairs overwrite flash; evict flash first.
+    If local_diplomatic is provided (diplomatic forms from main examples.json),
+    those pairs have huge weight: never overwrite them with new (e.g. Gemini) guesses.
     Caps total at max_learned. Returns count of newly added pairs.
     """
     p = Path(learned_path)
@@ -136,12 +139,16 @@ def add_learned_pairs(
         if d:
             existing[d] = (f, bool(e.get("pro")))
 
+    local = local_diplomatic or set()
     is_pro = _is_pro_model(model)
     added = 0
     for pair in pairs:
         d = (pair.get("diplomatic") or "").strip()
         f = (pair.get("full") or "").strip()
         if not d or d == f:
+            continue
+        # Huge weight on local pairs: never overwrite main examples with Gemini guesses
+        if d in local:
             continue
         if d not in existing:
             added += 1

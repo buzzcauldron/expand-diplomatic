@@ -153,8 +153,9 @@ def _schedule_auto_learn(
     *,
     model: str | None = None,
 ) -> None:
-    """Run auto-learn in a background thread when model is idle.
-    Pro model results are weighted higher (preferred on merge, evicted last)."""
+    """Run auto-learn in a background thread when Learn is ticked and Gemini was used.
+    Aggressive training (GPU): higher cap. Huge weight on local pairs: main examples
+    (examples.json) are never overwritten by Gemini guesses."""
     high_end = getattr(app, "_high_end_gpu", False)
 
     def learn() -> None:
@@ -166,11 +167,16 @@ def _schedule_auto_learn(
             pairs = extract_expansion_pairs(xml_input, xml_output)
             if not pairs:
                 return
+            # Local pairs (main examples) have huge weight: never overwrite with Gemini guesses
+            main_examples = load_examples(examples_path)
+            local_diplomatic = {e.get("diplomatic", "").strip() for e in main_examples if e.get("diplomatic")}
             learned_path = get_learned_path(examples_path)
             add_learned_pairs(
-                pairs, learned_path,
+                pairs,
+                learned_path,
                 max_learned=4000 if high_end else DEFAULT_MAX_LEARNED,
                 model=model,
+                local_diplomatic=local_diplomatic,
             )
         except Exception:
             pass  # Quiet: do not disturb user
