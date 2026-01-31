@@ -6,6 +6,27 @@ The project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ## [Unreleased]
 
+## [0.3.2] - 2025-01-30
+
+### Added
+
+- **Project purpose rule** (`.cursor/rules/project-purpose.mdc`): expand Latin manuscript abbreviations into full Latin words for highly accurate transcripts; training pairs as ground truth; output stays in Latin
+- **Learn: huge weight on local pairs**: when Learn is ticked and Gemini is used to expand, auto-learn adds Gemini-derived pairs to `learned_examples.json` but **never overwrites** diplomatic forms that exist in main examples (examples.json). Local/curated pairs are ground truth; only engage when Learn is ticked
+- **gra → gratia** in examples.json; rules engine avoids replacing "gra" inside "gratia" (prefix guard) so plain "gra" expands correctly without corrupting existing "gratia"
+- Toolbar **essential row** (Open, Expand, Re-expand, Save, ◀ ▶) stays visible when window is narrow; secondary row (Batch, In→TXT, Out→TXT, Diff + settings) scrolls horizontally
+
+### Changed
+
+- **GUI consistent basic design**: flat frames (no raised/sunken borders), font 9 for labels/buttons, unified padding; Input/Output panel titles shortened; Train label "Diplomatic" (was "Dip."); Train buttons In/Out/Add; Batch toggle "▶"/"▼" only; image strip arrow-only (▶/▼), Add button, no picture icon; narrow Search bar (width 14)
+- **Docstrings**: package and expander state purpose (Latin manuscript abbreviations → full Latin words; training pairs ground truth; output in Latin)
+- **local_llm**: skip pairs with empty full (never replace with empty); ground-truth post-pass documented; local modality prompt says training pairs are ground truth
+- **add_learned_pairs**: optional `local_diplomatic` set — diplomatic forms from main examples are never overwritten by new (Gemini) guesses; used when Learn is ticked for aggressive training with huge weight on local pairs
+- Toolbar scroll and Train search refresh throttled/debounced (50 ms and 150 ms)
+
+### Fixed
+
+- gratia / et cetera not expanding when source used different Unicode form (NFC/NFD); rules normalize before replace (0.3.1). 0.3.2: plain "gra" now expands to "gratia" without corrupting word "gratia" (prefix guard in rules)
+
 ## [0.3.1] - 2025-01-30
 
 ### Added
