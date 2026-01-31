@@ -320,6 +320,10 @@ def _expand_whole_document(
         raise ValueError(
             f"Model returned invalid XML: {e}. Try block-by-block mode (uncheck Whole doc) or retry."
         ) from e
+    # Training pairs override Gemini: apply examples to correct any diplomatic forms
+    if examples:
+        from .local_llm import run_local_rules
+        s = run_local_rules(s, examples=examples)
     return s
 
 
@@ -373,7 +377,7 @@ def _expand_text_block(
     from run_gemini import run_gemini
 
     system = MODALITY_SYSTEM.get(modality) or MODALITY_SYSTEM["full"]
-    return run_gemini(
+    raw = run_gemini(
         prompt,
         model=model,
         api_key=api_key,
@@ -382,6 +386,11 @@ def _expand_text_block(
         client=client,
         uploaded_file=uploaded_file,
     )
+    # Training pairs override Gemini: apply examples to correct any diplomatic forms
+    if examples:
+        from .local_llm import run_local_rules
+        return run_local_rules(raw, examples=examples, sorted_pairs=sorted_pairs)
+    return raw
 
 
 def _serialize_root(root: etree._Element) -> str:

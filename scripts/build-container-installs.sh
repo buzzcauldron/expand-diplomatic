@@ -50,6 +50,10 @@ detect_platform() {
     x86_64|amd64)
       platform="linux/amd64"
       ;;
+    armv7l|armv6l)
+      echo "Warning: armv7/v6 not supported (Ollama lacks builds); defaulting to linux/amd64" >&2
+      platform="linux/amd64"
+      ;;
     *)
       echo "Warning: unknown arch $arch, defaulting to linux/amd64" >&2
       platform="linux/amd64"

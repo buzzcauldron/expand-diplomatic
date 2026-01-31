@@ -42,6 +42,7 @@ _detect_platform() {
   case "$(uname -m 2>/dev/null)" in
     arm64|aarch64) echo "linux/arm64" ;;
     x86_64|amd64)  echo "linux/amd64" ;;
+    armv7l|armv6l) echo "linux/amd64" ;;  # armv7: Ollama has no build; use amd64 (emulated)
     *)             echo "linux/amd64" ;;
   esac
 }
