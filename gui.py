@@ -2040,7 +2040,7 @@ class App:
         except ValueError as e:
             _status(self, str(e))
             examples = []
-        search = (getattr(self, "_train_search_var", None) and self._train_search_var.get() or "").strip().lower()
+        search = (self._train_search_var.get() or "").strip().lower()
         total = len(examples)
         if search:
             examples = [
