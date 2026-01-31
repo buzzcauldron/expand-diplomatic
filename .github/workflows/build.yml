@@ -13,7 +13,7 @@ jobs:
     name: wheels
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, macos-14]  # macos-14 = Apple Silicon (arm64)
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4

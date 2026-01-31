@@ -273,6 +273,14 @@ All build scripts read the version automatically from `pyproject.toml`.
 
 ## Platform-Specific Notes
 
+### ARM Support (Apple Silicon, ARM64 Linux)
+
+- **Docker:** `linux/arm64` supported. On Apple Silicon, `run-container.sh --build` and `build-docker.sh --load` use native arm64 (not emulated amd64).
+- **macOS .app:** Built natively on Apple Silicon; no special flags needed.
+- **Python packages:** Pure Python (py3-none-any); runs on all architectures.
+- **CI:** GitHub Actions runs packages on `macos-14` (Apple Silicon) and `ubuntu-latest`.
+- **armv7/armv6:** Not supported (Ollama has no Linux build); scripts default to amd64.
+
 ### Linux (RPM/DEB)
 - Packages install to system Python directories (`/usr/lib/python3/dist-packages`)
 - Desktop entry appears in applications menu

@@ -57,6 +57,7 @@ if [[ -n "$DO_BUILD" ]] || ! docker image inspect "$IMAGE_NAME" &>/dev/null; the
   if [[ -z "$PLATFORM" ]]; then
     case "$(uname -m 2>/dev/null)" in
       arm64|aarch64) PLATFORM="linux/arm64" ;;
+      armv7l|armv6l) PLATFORM="linux/amd64" ;;  # Ollama has no armv7 build
       *)             PLATFORM="linux/amd64" ;;
     esac
     echo "Building for $PLATFORM..."
