@@ -9,7 +9,7 @@ This document describes how to build distribution packages for Expand Diplomatic
 ./scripts/build-all.sh
 
 # Or build specific formats
-./scripts/build-all.sh --rpm --deb --app
+./scripts/build-all.sh --rpm --deb --app --msi --zip --docker --packages
 ```
 
 ## Package Formats
@@ -97,13 +97,12 @@ pip install cx_Freeze
 
 **Output:**
 - `dist/expand-diplomatic-*.msi`
+- `dist/expand-diplomatic-portable.zip` (flat — extract puts files directly in folder, no subfolder)
 
 **Install:**
 ```bash
-# Interactive install (double-click MSI file in Windows Explorer)
-
-# Or silent install from command line
-msiexec /i expand-diplomatic-*.msi /qn
+# MSI: Interactive install (double-click) or: msiexec /i expand-diplomatic-*.msi /qn
+# Portable ZIP: Extract to any folder; run expand-diplomatic-gui.exe
 ```
 
 **Features:**
@@ -112,7 +111,18 @@ msiexec /i expand-diplomatic-*.msi /qn
 - Includes all dependencies (Python runtime, libraries, examples)
 - Uninstall via Windows Settings → Apps
 
-**Platforms:** Windows 10/11 (x64, arm64), WSL2
+**Platforms:** Windows 10/11 (x64, arm64)
+
+**WSL2:** Use Windows Python: `python.exe setup_msi.py bdist_msi` from the project dir. Or run the build on native Windows.
+
+**MSI troubleshooting:** If install fails, run `msiexec -i file.msi -l*vx msi_log.txt` to capture a log. Common fixes: use Windows Python (not WSL Linux Python), ensure icon is .ico (script auto-converts .png).
+
+**Portable ZIP only** (no MSI):
+```bash
+./scripts/build-windows-zip.sh
+# Or: ./scripts/build-all.sh --zip
+# Output: dist/expand-diplomatic-portable.zip — flat structure, no subfolder when extracted
+```
 
 ---
 

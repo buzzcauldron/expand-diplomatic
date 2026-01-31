@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Master build script - builds all package formats
-# Usage: ./scripts/build-all.sh [--rpm] [--deb] [--app] [--msi] [--docker] [--packages]
+# Usage: ./scripts/build-all.sh [--rpm] [--deb] [--app] [--msi] [--zip] [--docker] [--packages]
 #        ./scripts/build-all.sh  # Builds everything available on this platform
 
 set -euo pipefail
@@ -14,6 +14,7 @@ BUILD_RPM=0
 BUILD_DEB=0
 BUILD_APP=0
 BUILD_MSI=0
+BUILD_ZIP=0
 BUILD_DOCKER=0
 BUILD_PACKAGES=0
 
@@ -43,11 +44,12 @@ else
             --deb) BUILD_DEB=1 ;;
             --app) BUILD_APP=1 ;;
             --msi) BUILD_MSI=1 ;;
+            --zip) BUILD_ZIP=1 ;;
             --docker) BUILD_DOCKER=1 ;;
             --packages) BUILD_PACKAGES=1 ;;
             *)
                 echo "Unknown option: $arg"
-                echo "Usage: $0 [--rpm] [--deb] [--app] [--msi] [--docker] [--packages]"
+                echo "Usage: $0 [--rpm] [--deb] [--app] [--msi] [--zip] [--docker] [--packages]"
                 exit 1
                 ;;
         esac
@@ -110,15 +112,28 @@ if [[ $BUILD_APP -eq 1 ]]; then
     fi
 fi
 
-# Build Windows MSI
+# Build Windows MSI (also produces portable ZIP)
 if [[ $BUILD_MSI -eq 1 ]]; then
     if [[ "$PLATFORM" =~ ^(MINGW|MSYS|CYGWIN) ]] || grep -qi microsoft /proc/version 2>/dev/null; then
         echo "→ Building Windows MSI installer..."
         ./scripts/build-windows-msi.sh
-        BUILT+=("Windows MSI (dist/*.msi)")
+        BUILT+=("Windows MSI + portable ZIP (dist/*.msi, dist/*.zip)")
         echo ""
     else
         echo "⚠ Skipping Windows MSI: not on Windows or WSL2"
+        echo ""
+    fi
+fi
+
+# Build Windows portable ZIP only (no MSI)
+if [[ $BUILD_ZIP -eq 1 ]]; then
+    if [[ "$PLATFORM" =~ ^(MINGW|MSYS|CYGWIN) ]] || grep -qi microsoft /proc/version 2>/dev/null; then
+        echo "→ Building Windows portable ZIP..."
+        ./scripts/build-windows-zip.sh
+        BUILT+=("Windows portable ZIP (dist/*.zip)")
+        echo ""
+    else
+        echo "⚠ Skipping Windows ZIP: not on Windows or WSL2"
         echo ""
     fi
 fi

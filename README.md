@@ -260,12 +260,12 @@ Build native packages for different platforms:
 # Install: pip install dist/expand_diplomatic-*.whl
 ```
 
-### Windows MSI installer
+### Windows MSI and portable ZIP
 ```bash
 ./scripts/build-windows-msi.sh
 # Requires: Python with cx_Freeze on Windows or WSL2
-# Output: dist/*.msi
-# Install: Double-click the MSI file or run: msiexec /i <filename>.msi
+# Output: dist/*.msi and dist/expand-diplomatic-portable.zip
+# MSI: Double-click to install. Portable ZIP: extract to any folder — files go directly there (no subfolder).
 ```
 
 ### RPM (Red Hat, Fedora, CentOS, Rocky Linux)
