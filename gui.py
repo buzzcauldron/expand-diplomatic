@@ -771,44 +771,51 @@ class App:
         self.root.after(200, self._refresh_models_background)
 
     def _build_toolbar(self) -> None:
-        # Wrapper: canvas + horizontal scrollbar so toolbar reflows (scrolls) when window is narrow
+        # Essential row stays visible when window shrinks; rest scrolls horizontally
         toolbar_wrapper = tk.Frame(self.root)
         toolbar_wrapper.pack(side=tk.TOP, fill=tk.X, padx=2, pady=2)
-        self._toolbar_canvas = tk.Canvas(toolbar_wrapper, highlightthickness=0, height=70)
+        pad = dict(padx=2, pady=2)
+        opts = {"font": ("", 9), "takefocus": True}
+        # Essential row (fixed): Open, Expand, Re-expand, Save, prev/next — always visible
+        essential_row = tk.Frame(toolbar_wrapper, relief=tk.FLAT, bd=0)
+        essential_row.pack(side=tk.TOP, fill=tk.X)
+        for w in [
+            (tk.Button, "Open", self._on_open, {"width": 4}),
+            (tk.Button, "Expand", self._on_expand, {"width": 5}),
+            (tk.Button, "Re-expand", self._on_reexpand, {"width": 8}),
+            (tk.Button, "Save", self._on_save, {"width": 4}),
+            (tk.Button, "◀", self._on_prev_file, {"width": 2}),
+            (tk.Button, "▶", self._on_next_file, {"width": 2}),
+        ]:
+            cls, txt, cmd, kw = w
+            btn = cls(essential_row, text=txt, command=cmd, **{**pad, **kw})
+            btn.pack(side=tk.LEFT, **pad)
+            if txt == "Expand":
+                self.expand_btn = btn
+        # Scrollable area: secondary actions + settings (moves with window, scrolls when narrow)
+        self._toolbar_canvas = tk.Canvas(toolbar_wrapper, highlightthickness=0, height=56)
         self._toolbar_scrollbar = tk.Scrollbar(toolbar_wrapper, orient=tk.HORIZONTAL, command=self._toolbar_canvas.xview)
         self._toolbar_canvas.configure(xscrollcommand=self._toolbar_scrollbar.set)
         self._toolbar_canvas.pack(side=tk.TOP, fill=tk.X)
         self._toolbar_scrollbar.pack(side=tk.BOTTOM, fill=tk.X)
-        bar = tk.Frame(self._toolbar_canvas, relief=tk.RAISED, bd=1)
+        bar = tk.Frame(self._toolbar_canvas, relief=tk.FLAT, bd=0)
         self._toolbar_frame = bar
         self._toolbar_canvas_window = self._toolbar_canvas.create_window(0, 0, window=bar, anchor=tk.NW)
         self._toolbar_canvas.bind("<Configure>", self._on_toolbar_canvas_configure)
         bar.bind("<Configure>", lambda e: self._schedule_toolbar_scroll())
         self._toolbar_scroll_after_id: str | None = None
         self.root.after(50, self._update_toolbar_scroll)
-        pad = dict(padx=1, pady=1)
-        opts = {"font": ("", 8), "takefocus": True}
-        # Row 0: Primary actions
+        # Row 0: Secondary actions (Batch, export, Diff)
         r1 = tk.Frame(bar)
         r1.pack(side=tk.TOP, fill=tk.X)
-        c = 0
         for w in [
-            (tk.Button, "Open", self._on_open, {"width": 4}),
-            (tk.Button, "Expand", self._on_expand, {"width": 5}),
-            (tk.Button, "Re-expand", self._on_reexpand, {"width": 8}),
             (tk.Button, "Batch…", self._on_batch, {"width": 6}),
-            (tk.Button, "Save", self._on_save, {"width": 4}),
-            (tk.Button, "◀", self._on_prev_file, {"width": 2}),
-            (tk.Button, "▶", self._on_next_file, {"width": 2}),
             (tk.Button, "In→TXT", self._on_save_input_txt, {"width": 5}),
             (tk.Button, "Out→TXT", self._on_save_output_txt, {"width": 6}),
             (tk.Button, "Diff", self._on_diff, {"width": 4}),
         ]:
             cls, txt, cmd, kw = w
-            btn = cls(r1, text=txt, command=cmd, **{**pad, **kw})
-            btn.pack(side=tk.LEFT, **pad)
-            if txt == "Expand":
-                self.expand_btn = btn
+            cls(r1, text=txt, command=cmd, **{**pad, **kw}).pack(side=tk.LEFT, **pad)
         # Row 1: Settings (grid so Examples entry expands)
         r2 = tk.Frame(bar)
         r2.pack(side=tk.TOP, fill=tk.X)
@@ -930,35 +937,35 @@ class App:
         panes = tk.Frame(self.root)
         panes.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=4, pady=2)
 
-        # Image panel at top (collapsible, collapsed by default)
+        # Image strip at top (collapsible): arrow only, flat strip
         self._image_top = tk.Frame(panes)
-        self._image_top.pack(side=tk.TOP, fill=tk.X, padx=2)
-        self._image_collapsed_strip = tk.Frame(self._image_top, height=28, bg="SystemButtonFace")
-        self._image_collapsed_strip.pack(side=tk.TOP, fill=tk.X, padx=0, pady=0)
+        self._image_top.pack(side=tk.TOP, fill=tk.X, padx=2, pady=0)
+        self._image_collapsed_strip = tk.Frame(self._image_top, height=24, relief=tk.FLAT, bd=0)
+        self._image_collapsed_strip.pack(side=tk.TOP, fill=tk.X)
         self._image_collapsed_strip.pack_propagate(False)
         tk.Button(
-            self._image_collapsed_strip, text="🖼 ▶", font=("", 9),
+            self._image_collapsed_strip, text="▶", font=("", 9), width=2,
             command=self._toggle_image_panel,
-        ).pack(side=tk.LEFT, padx=2, pady=2)
-        self._image_panel = tk.LabelFrame(self._image_top, text="Image", height=220)
+        ).pack(side=tk.LEFT, padx=2, pady=1)
+        self._image_panel = tk.Frame(self._image_top, height=220, relief=tk.FLAT, bd=0)
         self._image_panel.pack_propagate(False)
         img_header = tk.Frame(self._image_panel)
         img_header.pack(fill=tk.X, padx=2, pady=2)
-        tk.Button(img_header, text="Upload…", command=self._on_upload_image, width=8).pack(side=tk.LEFT, padx=(0, 4))
-        tk.Button(img_header, text="▼", width=2, command=self._toggle_image_panel).pack(side=tk.LEFT)
-        self._image_canvas = tk.Canvas(self._image_panel, bg="gray90", highlightthickness=0)
+        tk.Button(img_header, text="▼", width=2, font=("", 9), command=self._toggle_image_panel).pack(side=tk.LEFT, padx=(0, 4))
+        tk.Button(img_header, text="Add", width=4, font=("", 9), command=self._on_upload_image).pack(side=tk.LEFT)
+        self._image_canvas = tk.Canvas(self._image_panel, bg="gray95", highlightthickness=0)
         self._image_canvas.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
         self._image_canvas.bind("<Configure>", self._on_image_canvas_configure)
 
-        # Input and output panels below
+        # Input and output panels
         content_row = tk.Frame(panes)
         content_row.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=0, pady=2)
-        left = tk.LabelFrame(content_row, text="Input (XML)")
+        left = tk.LabelFrame(content_row, text="Input", font=("", 9))
         left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=2)
         opts = {"wrap": tk.WORD, "font": self._font, "exportselection": False}
         self.input_txt = scrolledtext.ScrolledText(left, **opts)
         self.input_txt.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
-        right = tk.LabelFrame(content_row, text="Output (expanded)")
+        right = tk.LabelFrame(content_row, text="Output", font=("", 9))
         right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=2)
         self.output_txt = scrolledtext.ScrolledText(right, **opts)
         self.output_txt.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
@@ -974,20 +981,17 @@ class App:
 
     def _build_batch_panel(self) -> None:
         """Build collapsible batch file list panel (hidden by default)."""
-        self._batch_frame = tk.LabelFrame(self.root, text="Batch Processing", font=("", 9))
-        # Header row with toggle and summary
+        self._batch_frame = tk.LabelFrame(self.root, text="Batch", font=("", 9))
         header = tk.Frame(self._batch_frame, relief=tk.FLAT)
         header.pack(fill=tk.X, padx=2, pady=2)
         self._batch_toggle_btn = tk.Button(
-            header, text="▼ Files", width=8, anchor=tk.W,
-            command=self._toggle_batch_list, font=("", 8), relief=tk.RAISED,
+            header, text="▶", width=2, command=self._toggle_batch_list, font=("", 9),
         )
         self._batch_toggle_btn.pack(side=tk.LEFT, padx=2)
         self._batch_summary_var = tk.StringVar(value="")
         tk.Label(header, textvariable=self._batch_summary_var, font=("", 9), anchor=tk.W).pack(side=tk.LEFT, padx=4)
-        tk.Button(header, text="✕", width=2, command=self._hide_batch_panel, font=("", 8), relief=tk.FLAT).pack(side=tk.RIGHT, padx=2)
-        # File list (scrolled text, initially hidden)
-        self._batch_list_frame = tk.Frame(self._batch_frame, relief=tk.SUNKEN, bd=1)
+        tk.Button(header, text="✕", width=2, command=self._hide_batch_panel, font=("", 9)).pack(side=tk.RIGHT, padx=2)
+        self._batch_list_frame = tk.Frame(self._batch_frame, relief=tk.FLAT)
         self._batch_listbox = scrolledtext.ScrolledText(
             self._batch_list_frame, height=6, wrap=tk.NONE, state=tk.DISABLED,
             font=("Courier", 9), bg="#fafafa", relief=tk.FLAT,
@@ -1005,11 +1009,11 @@ class App:
         """Toggle visibility of the batch file list."""
         if self._batch_list_expanded:
             self._batch_list_frame.pack_forget()
-            self._batch_toggle_btn.config(text="▶ Files")
+            self._batch_toggle_btn.config(text="▶")
             self._batch_list_expanded = False
         else:
             self._batch_list_frame.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
-            self._batch_toggle_btn.config(text="▼ Files")
+            self._batch_toggle_btn.config(text="▼")
             self._batch_list_expanded = True
 
     def _show_batch_panel(self, files: list) -> None:
@@ -1164,48 +1168,48 @@ class App:
             _status(self, f"Autosaved {', '.join(saved)}")
 
     def _build_train(self) -> None:
-        tr = tk.LabelFrame(self.root, text="Train (add examples)")
+        tr = tk.LabelFrame(self.root, text="Train", font=("", 9))
         tr.pack(side=tk.TOP, fill=tk.X, padx=4, pady=2)
-        self._train_frame = tr  # Reference for batch panel positioning
+        self._train_frame = tr
         row = tk.Frame(tr)
         row.pack(fill=tk.X, padx=2, pady=2)
-        row.columnconfigure(1, weight=1)  # Diplomatic entry
-        row.columnconfigure(4, weight=1)  # Full entry
-        tk.Label(row, text="Diplomatic:").grid(row=0, column=0, sticky=tk.W, padx=(0, 2), pady=2)
+        row.columnconfigure(1, weight=1)
+        row.columnconfigure(4, weight=1)
+        pad = dict(padx=2, pady=2)
+        tk.Label(row, text="Diplomatic", font=("", 9)).grid(row=0, column=0, sticky=tk.W, **pad)
         self.dip_var = tk.StringVar()
         dip_entry = tk.Entry(row, textvariable=self.dip_var)
-        dip_entry.grid(row=0, column=1, sticky=tk.EW, padx=2, pady=2)
-        tk.Button(row, text="From input", command=self._on_dip_from_input, width=8).grid(row=0, column=2, padx=2, pady=2)
-        tk.Label(row, text="Full:").grid(row=0, column=3, sticky=tk.W, padx=(8, 2), pady=2)
+        dip_entry.grid(row=0, column=1, sticky=tk.EW, **pad)
+        tk.Button(row, text="In", width=3, font=("", 9), command=self._on_dip_from_input).grid(row=0, column=2, **pad)
+        tk.Label(row, text="Full", font=("", 9)).grid(row=0, column=3, sticky=tk.W, **pad)
         self.full_var = tk.StringVar()
         full_entry = tk.Entry(row, textvariable=self.full_var)
-        full_entry.grid(row=0, column=4, sticky=tk.EW, padx=2, pady=2)
-        tk.Button(row, text="From output", command=self._on_full_from_output, width=9).grid(row=0, column=5, padx=2, pady=2)
-        add_btn = tk.Button(row, text="Add pair", command=self._on_add_example, width=8)
-        add_btn.grid(row=0, column=6, padx=4, pady=2)
+        full_entry.grid(row=0, column=4, sticky=tk.EW, **pad)
+        tk.Button(row, text="Out", width=3, font=("", 9), command=self._on_full_from_output).grid(row=0, column=5, **pad)
+        add_btn = tk.Button(row, text="Add", width=4, font=("", 9), command=self._on_add_example)
+        add_btn.grid(row=0, column=6, **pad)
         def _add_on_ctrl_return(_e) -> str:
             self._on_add_example()
             return "break"
 
         for w in (dip_entry, full_entry):
             w.bind("<Control-Return>", _add_on_ctrl_return)
-        # Search filter for the examples list
         search_row = tk.Frame(tr)
         search_row.pack(fill=tk.X, padx=2, pady=(0, 2))
-        tk.Label(search_row, text="Search:").pack(side=tk.LEFT, padx=(0, 4), pady=2)
+        tk.Label(search_row, text="Search", font=("", 9)).pack(side=tk.LEFT, padx=(0, 4), pady=2)
         self._train_search_var = tk.StringVar()
         self._train_refresh_after_id: str | None = None
         self._train_search_var.trace_add("write", self._schedule_train_refresh)
-        search_entry = tk.Entry(search_row, textvariable=self._train_search_var, width=14)
+        search_entry = tk.Entry(search_row, textvariable=self._train_search_var, width=14, font=("", 9))
         search_entry.pack(side=tk.LEFT, padx=2, pady=2)
-        tk.Button(search_row, text="✕", width=2, command=lambda: self._train_search_var.set("")).pack(side=tk.LEFT, padx=2, pady=2)
+        tk.Button(search_row, text="✕", width=2, font=("", 9), command=lambda: self._train_search_var.set("")).pack(side=tk.LEFT, padx=2, pady=2)
         self.train_list = scrolledtext.ScrolledText(tr, height=3, wrap=tk.WORD, state=tk.DISABLED, font=self._font_sm)
         self.train_list.pack(fill=tk.X, padx=2, pady=2)
         self._refresh_train_list()
 
     def _build_status(self) -> None:
-        status_frame = tk.Frame(self.root, relief=tk.SUNKEN, bd=1)
-        status_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=2, pady=2)
+        status_frame = tk.Frame(self.root, relief=tk.FLAT, bd=0)
+        status_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=4, pady=2)
         status_frame.columnconfigure(1, weight=1)
         # Status message
         tk.Label(status_frame, textvariable=self.status_var, anchor=tk.W, font=("", 9)).grid(

@@ -1,4 +1,4 @@
-"""Core logic: expand XML via Gemini. load/save_examples live in examples_io."""
+"""Core logic: expand Latin manuscript abbreviations to full Latin words in XML (Gemini or local). Training pairs are ground truth; output stays in Latin."""
 
 from __future__ import annotations
 
@@ -204,7 +204,7 @@ MODALITY_SYSTEM: dict[str, str] = {
     "local": (
         "Expand manuscript diplomatic transcriptions accurately: resolve abbreviations and superscripts."
         + _LATIN
-        + " Output only the expanded text, no XML, no commentary. Use the examples as your guide."
+        + " The training pairs below are ground truth: always output the Full form for any Diplomatic form in the list. Output only the expanded text, no XML, no commentary."
     ),
 }
 

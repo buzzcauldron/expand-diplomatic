@@ -1,0 +1,5 @@
+# Project purpose
+
+- **Purpose:** Expand Latin manuscript abbreviations into full Latin words in highly accurate transcripts.
+- **Domain:** Medieval/Latin diplomatic transcriptions (abbreviations, superscripts, Tironian notes, etc.) → full, readable Latin.
+- **Accuracy:** Training pairs and rules are ground truth; output should preserve fidelity to the source while expanding abbreviations correctly. Do not translate to other languages; keep expanded form in Latin.

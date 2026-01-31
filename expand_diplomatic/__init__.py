@@ -1,4 +1,4 @@
-"""Expand diplomatic transcriptions to full form via Gemini API."""
+"""Expand Latin manuscript abbreviations into full Latin words for highly accurate transcripts (Gemini API or local Ollama)."""
 
 from ._version import __version__
 from .examples_io import add_learned_pairs, clear_examples_cache, get_learned_path, load_examples, load_learned, save_examples
