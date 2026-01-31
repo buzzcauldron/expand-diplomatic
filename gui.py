@@ -893,12 +893,36 @@ class App:
     def _build_main(self) -> None:
         panes = tk.Frame(self.root)
         panes.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=4, pady=2)
-        left = tk.LabelFrame(panes, text="Input (XML)")
+
+        # Image panel at top (collapsible, collapsed by default)
+        self._image_top = tk.Frame(panes)
+        self._image_top.pack(side=tk.TOP, fill=tk.X, padx=2)
+        self._image_collapsed_strip = tk.Frame(self._image_top, height=28, bg="SystemButtonFace")
+        self._image_collapsed_strip.pack(side=tk.TOP, fill=tk.X, padx=0, pady=0)
+        self._image_collapsed_strip.pack_propagate(False)
+        tk.Button(
+            self._image_collapsed_strip, text="🖼 ▶", font=("", 9),
+            command=self._toggle_image_panel,
+        ).pack(side=tk.LEFT, padx=2, pady=2)
+        self._image_panel = tk.LabelFrame(self._image_top, text="Image", height=220)
+        self._image_panel.pack_propagate(False)
+        img_header = tk.Frame(self._image_panel)
+        img_header.pack(fill=tk.X, padx=2, pady=2)
+        tk.Button(img_header, text="Upload…", command=self._on_upload_image, width=8).pack(side=tk.LEFT, padx=(0, 4))
+        tk.Button(img_header, text="▼", width=2, command=self._toggle_image_panel).pack(side=tk.LEFT)
+        self._image_canvas = tk.Canvas(self._image_panel, bg="gray90", highlightthickness=0)
+        self._image_canvas.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
+        self._image_canvas.bind("<Configure>", self._on_image_canvas_configure)
+
+        # Input and output panels below
+        content_row = tk.Frame(panes)
+        content_row.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=0, pady=2)
+        left = tk.LabelFrame(content_row, text="Input (XML)")
         left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=2)
         opts = {"wrap": tk.WORD, "font": self._font, "exportselection": False}
         self.input_txt = scrolledtext.ScrolledText(left, **opts)
         self.input_txt.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
-        right = tk.LabelFrame(panes, text="Output (expanded)")
+        right = tk.LabelFrame(content_row, text="Output (expanded)")
         right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=2)
         self.output_txt = scrolledtext.ScrolledText(right, **opts)
         self.output_txt.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
@@ -911,27 +935,6 @@ class App:
         self.output_txt.bind("<Double-Button-1>", self._on_panel_double_click)
         self.input_txt.bind("<KeyRelease>", self._on_input_activity)
         self.output_txt.bind("<KeyRelease>", self._on_input_activity)
-
-        # Third panel: image (collapsible, collapsed by default)
-        self._image_right = tk.Frame(panes)
-        self._image_right.pack(side=tk.LEFT, fill=tk.BOTH, padx=2)
-        self._image_collapsed_strip = tk.Frame(self._image_right, width=28, bg="SystemButtonFace")
-        self._image_collapsed_strip.pack(side=tk.LEFT, fill=tk.Y, padx=0, pady=0)
-        self._image_collapsed_strip.pack_propagate(False)
-        tk.Button(
-            self._image_collapsed_strip, text="🖼\n▶", font=("", 9), width=3,
-            command=self._toggle_image_panel,
-        ).pack(fill=tk.BOTH, expand=True)
-        self._image_panel = tk.LabelFrame(self._image_right, text="Image")
-        img_header = tk.Frame(self._image_panel)
-        img_header.pack(fill=tk.X, padx=2, pady=2)
-        tk.Button(img_header, text="Upload…", command=self._on_upload_image, width=8).pack(side=tk.LEFT, padx=(0, 4))
-        tk.Button(img_header, text="◀", width=2, command=self._toggle_image_panel).pack(side=tk.LEFT)
-        self._image_canvas = tk.Canvas(self._image_panel, bg="gray90", highlightthickness=0)
-        self._image_canvas.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
-        self._image_canvas.bind("<Configure>", self._on_image_canvas_configure)
-        self._image_panel.configure(width=280)
-        self._image_panel.pack_propagate(True)
 
     def _build_batch_panel(self) -> None:
         """Build collapsible batch file list panel (hidden by default)."""
@@ -1013,11 +1016,11 @@ class App:
         """Expand or collapse the image panel."""
         if self._image_panel_expanded:
             self._image_panel.pack_forget()
-            self._image_collapsed_strip.pack(side=tk.LEFT, fill=tk.Y, padx=0, pady=0)
+            self._image_collapsed_strip.pack(side=tk.TOP, fill=tk.X, padx=0, pady=0)
             self._image_panel_expanded = False
         else:
             self._image_collapsed_strip.pack_forget()
-            self._image_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=0, pady=0)
+            self._image_panel.pack(side=tk.TOP, fill=tk.X, padx=0, pady=2)
             self._image_panel_expanded = True
             if self.image_path is not None:
                 self.root.after(50, lambda: self._display_image(self.image_path))
@@ -1150,6 +1153,15 @@ class App:
 
         for w in (dip_entry, full_entry):
             w.bind("<Control-Return>", _add_on_ctrl_return)
+        # Search filter for the examples list
+        search_row = tk.Frame(tr)
+        search_row.pack(fill=tk.X, padx=2, pady=(0, 2))
+        tk.Label(search_row, text="Search:").pack(side=tk.LEFT, padx=(0, 4), pady=2)
+        self._train_search_var = tk.StringVar()
+        self._train_search_var.trace_add("write", lambda *a: self._refresh_train_list())
+        search_entry = tk.Entry(search_row, textvariable=self._train_search_var, width=24)
+        search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2, pady=2)
+        tk.Button(search_row, text="✕", width=2, command=lambda: self._train_search_var.set("")).pack(side=tk.LEFT, padx=2, pady=2)
         self.train_list = scrolledtext.ScrolledText(tr, height=3, wrap=tk.WORD, state=tk.DISABLED, font=self._font_sm)
         self.train_list.pack(fill=tk.X, padx=2, pady=2)
         self._refresh_train_list()
@@ -1971,8 +1983,17 @@ class App:
         except ValueError as e:
             _status(self, str(e))
             examples = []
+        search = (getattr(self, "_train_search_var", None) and self._train_search_var.get() or "").strip().lower()
+        total = len(examples)
+        if search:
+            examples = [
+                e for e in examples
+                if search in (e.get("diplomatic") or "").lower() or search in (e.get("full") or "").lower()
+            ]
         self.train_list.config(state=tk.NORMAL)
         self.train_list.delete("1.0", tk.END)
+        if search and total:
+            self.train_list.insert(tk.END, f"  ({len(examples)} of {total} pairs)\n")
         for e in examples:
             self.train_list.insert(tk.END, f"  {e['diplomatic']!r} → {e['full']!r}\n")
         self.train_list.config(state=tk.DISABLED)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import unicodedata
 import urllib.error
 import urllib.request
 
@@ -28,6 +29,8 @@ def run_local_rules(
     Expand using training examples only: replace each diplomatic→full in text.
     Longest matches first to avoid overlapping substitutions. No Ollama or API.
     Pass sorted_pairs to skip per-call sort when same examples used for many blocks.
+    Text and diplomatic keys are normalized to NFC so NFD forms (e.g. "grã" vs "grã")
+    match and replacements work regardless of Unicode encoding.
     """
     if not text or not text.strip():
         return text
@@ -41,12 +44,12 @@ def run_local_rules(
         )
     else:
         return text
-    out = text
+    out = unicodedata.normalize("NFC", text)
     for d, f in pairs:
         if not d:
             continue
-        # Replace whole-word / standalone occurrences first; then any occurrence
-        out = out.replace(d, f)
+        d_nfc = unicodedata.normalize("NFC", d)
+        out = out.replace(d_nfc, f)
     return out
 
 
