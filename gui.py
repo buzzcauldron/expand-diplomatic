@@ -1584,26 +1584,36 @@ class App:
         whole_doc = True
         ex_path = examples_path if (whole_doc and backend == "gemini" and not include_learned) else None
 
+        def _is_timeout(e: BaseException) -> bool:
+            if isinstance(e, TimeoutError):
+                return True
+            s = str(e).lower()
+            return "timeout" in s or "timed out" in s
+
         def expand_one(f: Path) -> tuple[Path, bool, str]:
             # Mark as processing
             self.root.after(0, lambda: self._update_batch_file_status(f.name, "processing"))
-            try:
-                from expand_diplomatic.expander import expand_xml
-                xml = f.read_text(encoding="utf-8")
-                out_path = f.parent / f"{f.stem}_expanded.xml"
-                result = expand_xml(
-                    xml, examples,
-                    model=model,
-                    api_key=api_key,
-                    backend=backend,
-                    modality=modality,
-                    whole_document=whole_doc,
-                    examples_path=ex_path,
-                )
-                out_path.write_text(result, encoding="utf-8")
-                return (f, True, f.name)
-            except Exception as e:
-                return (f, False, f"{f.name}: {e}")
+            from expand_diplomatic.expander import expand_xml
+            xml = f.read_text(encoding="utf-8")
+            out_path = f.parent / f"{f.stem}_expanded.xml"
+            max_attempts = 3
+            for attempt in range(max_attempts):
+                try:
+                    result = expand_xml(
+                        xml, examples,
+                        model=model,
+                        api_key=api_key,
+                        backend=backend,
+                        modality=modality,
+                        whole_document=whole_doc,
+                        examples_path=ex_path,
+                    )
+                    out_path.write_text(result, encoding="utf-8")
+                    return (f, True, f.name)
+                except Exception as e:
+                    if _is_timeout(e) and attempt < max_attempts - 1:
+                        continue
+                    return (f, False, f"{f.name}: {e}")
 
         def run_batch() -> None:
             nonlocal completed, failed, cancelled
