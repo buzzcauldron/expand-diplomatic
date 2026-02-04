@@ -6,6 +6,7 @@ Requires tkinter (stdlib). Run: python gui.py
 
 from __future__ import annotations
 
+import json
 import os
 import threading
 import time
@@ -48,7 +49,6 @@ _ensure_env()
 
 def _load_preferences() -> dict:
     """Load user preferences from disk. Returns dict; empty on failure."""
-    import json
     try:
         if PREFS_PATH.exists():
             data = json.loads(PREFS_PATH.read_text(encoding="utf-8"))
@@ -60,7 +60,6 @@ def _load_preferences() -> dict:
 
 def _save_preferences(prefs: dict) -> None:
     """Save user preferences to disk."""
-    import json
     try:
         PREFS_PATH.parent.mkdir(parents=True, exist_ok=True)
         PREFS_PATH.write_text(json.dumps(prefs, indent=0), encoding="utf-8")
@@ -176,7 +175,7 @@ def _schedule_auto_learn(
             from expand_diplomatic.examples_io import appearance_key
 
             from expand_diplomatic.expander import extract_expansion_pairs, pairs_to_word_level
-            from expand_diplomatic.learning import add_to_review_queue
+            from expand_diplomatic.learning import add_to_review_queue, increment_staging_run_count
 
             block_pairs = extract_expansion_pairs(xml_input, xml_output)
             pairs = pairs_to_word_level(block_pairs)
@@ -188,11 +187,12 @@ def _schedule_auto_learn(
             if not pairs:
                 return
             path = getattr(app, "last_input_path", None)
-            added = add_to_review_queue(pairs, source=model or "gemini", path=path)
-            if added and getattr(app, "_refresh_review_list", None) is not None:
+            n = add_to_review_queue(pairs, source=model or "gemini", path=path)
+            increment_staging_run_count()
+            if n and getattr(app, "_refresh_review_list", None) is not None:
                 app.root.after(0, app._refresh_review_list)
-            if added:
-                app.root.after(0, lambda: _status(app, f"{added} pair(s) staged for review."))
+            if n:
+                app.root.after(0, lambda: _status(app, f"{n} pair(s) staged or updated for review."))
         except Exception:
             pass  # Quiet: do not disturb user
 
@@ -337,6 +337,7 @@ def _expand_worker(
         app.progress_bar["value"] = 0
         app.time_label_var.set("")
         app.cancel_btn.config(state=tk.DISABLED)
+        app.cancel_btn.grid_remove()
         _stop_hang_check(app)
         if getattr(app, "expand_run_id", -1) != run_id:
             return
@@ -721,6 +722,7 @@ def _run_expand_internal(
     else:
         app.progress_bar.configure(mode="determinate")
         app.progress_bar["value"] = 0
+    app.cancel_btn.grid()
     app.cancel_btn.config(state=tk.NORMAL)
     # Start processing animation
     app._processing_frame = 0
@@ -1090,8 +1092,16 @@ class App:
         self.root.after(10, self._update_toolbar_scroll)
 
     def _build_main(self) -> None:
-        panes = tk.Frame(self.root)
-        panes.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=4, pady=2)
+        # Vertical PanedWindow: top = content (image + input/output), bottom = Review + Train (draggable sash)
+        self._main_paned = tk.PanedWindow(
+            self.root, orient=tk.VERTICAL, sashrelief=tk.RAISED, sashwidth=6, showhandle=False
+        )
+        self._main_paned.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=4, pady=2)
+
+        panes = tk.Frame(self._main_paned)
+        self._main_paned.add(panes, minsize=120)
+        self._bottom_section = tk.Frame(self._main_paned)
+        self._main_paned.add(self._bottom_section, minsize=80)
 
         # Image strip at top (collapsible): arrow only, flat strip
         self._image_top = tk.Frame(panes)
@@ -1150,7 +1160,8 @@ class App:
         """Build collapsible batch file list panel (hidden by default)."""
         font9 = ("", 9)
         btn_opts = {"font": font9, "takefocus": True, "padx": 6, "pady": 2}
-        self._batch_frame = tk.LabelFrame(self.root, text="Batch", font=font9)
+        parent = getattr(self, "_bottom_section", self.root)
+        self._batch_frame = tk.LabelFrame(parent, text="Batch", font=font9)
         header = tk.Frame(self._batch_frame, relief=tk.FLAT)
         header.pack(fill=tk.X, padx=2, pady=2)
         self._batch_toggle_btn = tk.Button(
@@ -1179,7 +1190,8 @@ class App:
         """Build collapsible Review learned panel (staged pairs from Gemini)."""
         font9 = ("", 9)
         btn_opts = {"font": font9, "takefocus": True, "padx": 6, "pady": 2}
-        self._review_frame = tk.LabelFrame(self.root, text="Review learned", font=font9)
+        parent = getattr(self, "_bottom_section", self.root)
+        self._review_frame = tk.LabelFrame(parent, text="Review learned", font=font9)
         header = tk.Frame(self._review_frame, relief=tk.FLAT)
         header.pack(fill=tk.X, padx=2, pady=2)
         self._review_toggle_btn = tk.Button(header, text="▶", width=2, command=self._toggle_review_list, **btn_opts)
@@ -1187,6 +1199,7 @@ class App:
         self._review_summary_var = tk.StringVar(value="(0 staged)")
         tk.Label(header, textvariable=self._review_summary_var, font=font9, anchor=tk.W).pack(side=tk.LEFT, padx=4)
         self._review_queue_items: list[dict] = []
+        self._review_selected_index: int | None = None
         self._review_list_frame = tk.Frame(self._review_frame, relief=tk.FLAT)
         self._review_search_var = tk.StringVar()
         self._review_search_var.trace_add("write", self._schedule_review_refresh)
@@ -1195,15 +1208,19 @@ class App:
         tk.Label(search_row, text="Search", font=font9).pack(side=tk.LEFT, padx=(0, 4))
         tk.Entry(search_row, textvariable=self._review_search_var, width=32, font=font9).pack(side=tk.LEFT, padx=2)
         self._review_listbox = scrolledtext.ScrolledText(
-            self._review_list_frame, height=5, wrap=tk.WORD, state=tk.DISABLED,
+            self._review_list_frame, height=5, wrap=tk.WORD, state=tk.NORMAL,
             font=font9, bg="#fafafa", relief=tk.FLAT,
         )
         self._review_listbox.tag_configure("selected", background="#cce0ff")
         self._review_listbox.pack(fill=tk.BOTH, expand=True, padx=0, pady=2)
         self._review_listbox.bind("<Button-1>", self._on_review_list_click)
         self._review_listbox.bind("<Double-Button-1>", self._on_review_list_double_click)
+        self._review_listbox.bind("<KeyRelease>", self._schedule_review_autosave)
+        self._review_listbox.bind("<FocusOut>", self._on_review_list_focus_out)
+        self._review_autosave_after_id: str | None = None
         btns = tk.Frame(self._review_list_frame)
         btns.pack(fill=tk.X, pady=2)
+        tk.Button(btns, text="Save edits", width=9, command=self._review_save_edits, **btn_opts).pack(side=tk.LEFT, padx=2)
         tk.Button(btns, text="Accept", width=7, command=self._review_accept, **btn_opts).pack(side=tk.LEFT, padx=2)
         tk.Button(btns, text="Reject", width=6, command=self._review_reject, **btn_opts).pack(side=tk.LEFT, padx=2)
         tk.Button(btns, text="Edit", width=4, command=self._review_edit, **btn_opts).pack(side=tk.LEFT, padx=2)
@@ -1223,6 +1240,24 @@ class App:
         self._review_refresh_after_id = None
         self._refresh_review_list()
 
+    def _schedule_review_autosave(self, event: tk.Event | None = None) -> None:
+        """Debounce: save typed edits after 800 ms idle (default autosave)."""
+        if self._review_autosave_after_id is not None:
+            self.root.after_cancel(self._review_autosave_after_id)
+        self._review_autosave_after_id = self.root.after(800, self._do_review_autosave)
+
+    def _do_review_autosave(self) -> None:
+        self._review_autosave_after_id = None
+        if self._review_apply_edits_from_text():
+            _status(self, "Saved.")
+
+    def _on_review_list_focus_out(self, event: tk.Event) -> None:
+        """Save immediately when focus leaves the list."""
+        if self._review_autosave_after_id is not None:
+            self.root.after_cancel(self._review_autosave_after_id)
+            self._review_autosave_after_id = None
+        self._review_apply_edits_from_text()
+
     def _toggle_review_list(self) -> None:
         if self._review_list_expanded:
             self._review_list_frame.pack_forget()
@@ -1236,6 +1271,9 @@ class App:
     def _refresh_review_list(self) -> None:
         from expand_diplomatic.learning import load_review_queue, queue_items_to_word_level
 
+        if self._review_autosave_after_id is not None:
+            self.root.after_cancel(self._review_autosave_after_id)
+            self._review_autosave_after_id = None
         search = (self._review_search_var.get() or "").strip().lower()
         raw = load_review_queue()
         # Expand block-level pairs to word-level so list shows single word → word per line
@@ -1250,19 +1288,52 @@ class App:
         self._review_summary_var.set(f"({len(self._review_queue_items)} staged)")
         self._review_listbox.config(state=tk.NORMAL)
         self._review_listbox.delete("1.0", tk.END)
-        for i, e in enumerate(self._review_queue_items):
-            d = (e.get("diplomatic") or "").strip()
-            f = (e.get("full") or "").strip()
-            self._review_listbox.insert(tk.END, f"  {d} → {f}\n")
-        self._review_listbox.config(state=tk.DISABLED)
-        self._review_selected_index: int | None = None
+        text = "".join(
+            f"  {(e.get('diplomatic') or '').strip()} → {(e.get('full') or '').strip()}\n"
+            for e in self._review_queue_items
+        )
+        if text:
+            self._review_listbox.insert(tk.END, text)
+        self._review_selected_index = None
         self._update_review_selection_highlight()
+
+    def _review_apply_edits_from_text(self) -> bool:
+        """Parse list content (lines '  diplomatic → full') and save to review queue. Returns True if saved."""
+        from expand_diplomatic.learning import save_review_queue
+
+        content = self._review_listbox.get("1.0", tk.END)
+        new_items: list[dict] = []
+        existing = self._review_queue_items
+        for i, line in enumerate(content.splitlines()):
+            line = line.strip()
+            if " → " not in line:
+                continue
+            parts = line.split(" → ", 1)
+            diplomatic = (parts[0] or "").strip()
+            full = (parts[1] or "").strip()
+            if not diplomatic or not full:
+                continue
+            if i < len(existing):
+                ex = existing[i]
+                extra = {k: ex[k] for k in ex if k not in ("diplomatic", "full")}
+                new_items.append({"diplomatic": diplomatic, "full": full, **extra})
+            else:
+                new_items.append({"diplomatic": diplomatic, "full": full})
+        self._review_queue_items = new_items
+        save_review_queue(self._review_queue_items)
+        self._review_summary_var.set(f"({len(new_items)} staged)")
+        return True
+
+    def _review_save_edits(self) -> None:
+        """Explicit save (also used when user clicks Save edits)."""
+        if self._review_apply_edits_from_text():
+            _status(self, "Edits saved.")
 
     def _update_review_selection_highlight(self) -> None:
         """Highlight the currently selected line in the review list."""
         try:
             self._review_listbox.tag_remove("selected", "1.0", tk.END)
-            idx = getattr(self, "_review_selected_index", None)
+            idx = self._review_selected_index
             if idx is not None and 0 <= idx < len(self._review_queue_items):
                 line_start = f"{idx + 1}.0"
                 line_end = f"{idx + 2}.0"
@@ -1270,31 +1341,32 @@ class App:
         except Exception:
             pass
 
-    def _on_review_list_click(self, event: tk.Event) -> None:
+    def _review_index_at_event(self, event: tk.Event) -> int | None:
+        """Return 0-based index of the list line at event, or None."""
         if not self._review_queue_items:
-            return
-        line = self._review_listbox.index(f"@{event.x},{event.y}")
+            return None
         try:
+            line = self._review_listbox.index(f"@{event.x},{event.y}")
             line_num = int(line.split(".")[0])
             if 1 <= line_num <= len(self._review_queue_items):
-                self._review_selected_index = line_num - 1
-                self._update_review_selection_highlight()
+                return line_num - 1
         except (ValueError, IndexError):
             pass
+        return None
+
+    def _on_review_list_click(self, event: tk.Event) -> None:
+        idx = self._review_index_at_event(event)
+        if idx is not None:
+            self._review_selected_index = idx
+            self._update_review_selection_highlight()
 
     def _on_review_list_double_click(self, event: tk.Event) -> None:
         """Double-click opens Edit dialog for the clicked pair."""
-        if not self._review_queue_items:
-            return
-        line = self._review_listbox.index(f"@{event.x},{event.y}")
-        try:
-            line_num = int(line.split(".")[0])
-            if 1 <= line_num <= len(self._review_queue_items):
-                self._review_selected_index = line_num - 1
-                self._update_review_selection_highlight()
-                self._review_edit()
-        except (ValueError, IndexError):
-            pass
+        idx = self._review_index_at_event(event)
+        if idx is not None:
+            self._review_selected_index = idx
+            self._update_review_selection_highlight()
+            self._review_edit()
 
     def _review_accept(self) -> None:
         self._review_apply_to_selected(promote_to_project=False)
@@ -1303,9 +1375,9 @@ class App:
         self._review_apply_to_selected(promote_to_project=True)
 
     def _review_apply_to_selected(self, promote_to_project: bool) -> None:
-        from expand_diplomatic.learning import load_personal_learned, save_personal_learned, load_review_queue, save_review_queue
+        from expand_diplomatic.learning import load_personal_learned, save_personal_learned, save_review_queue
 
-        idx = getattr(self, "_review_selected_index", None)
+        idx = self._review_selected_index
         if idx is None or idx < 0 or idx >= len(self._review_queue_items):
             messagebox.showinfo("Review", "Select a pair in the list first.", parent=self.root)
             return
@@ -1333,7 +1405,6 @@ class App:
             personal.append({"diplomatic": diplomatic, "full": full})
             save_personal_learned(personal)
         # Remove accepted item from in-memory list (word-level) and persist
-        idx = getattr(self, "_review_selected_index", None)
         if idx is not None and 0 <= idx < len(self._review_queue_items):
             self._review_queue_items.pop(idx)
         save_review_queue(self._review_queue_items)
@@ -1342,19 +1413,24 @@ class App:
         _status(self, "Accepted and added to " + ("project examples" if promote_to_project else "personal learned"))
 
     def _review_reject(self) -> None:
-        from expand_diplomatic.learning import save_review_queue
+        from expand_diplomatic.examples_io import appearance_key
+        from expand_diplomatic.learning import record_individual_reject, save_review_queue
 
-        idx = getattr(self, "_review_selected_index", None)
+        idx = self._review_selected_index
         if idx is None or idx < 0 or idx >= len(self._review_queue_items):
             messagebox.showinfo("Review", "Select a pair in the list first.", parent=self.root)
             return
+        item = self._review_queue_items[idx]
+        diplomatic = (item.get("diplomatic") or "").strip()
         self._review_queue_items.pop(idx)
         save_review_queue(self._review_queue_items)
+        if diplomatic:
+            record_individual_reject(appearance_key(diplomatic))
         self._refresh_review_list()
-        _status(self, "Rejected")
+        _status(self, "Rejected (won’t re-suggest for 3–4 documents)")
 
     def _review_edit(self) -> None:
-        idx = getattr(self, "_review_selected_index", None)
+        idx = self._review_selected_index
         if idx is None or idx < 0 or idx >= len(self._review_queue_items):
             messagebox.showinfo("Review", "Select a pair in the list first.", parent=self.root)
             return
@@ -1379,7 +1455,7 @@ class App:
             if not nd or not nf:
                 return
             # Update in-memory list (word-level) and persist
-            edit_idx = getattr(self, "_review_selected_index", None)
+            edit_idx = self._review_selected_index
             if edit_idx is not None and 0 <= edit_idx < len(self._review_queue_items):
                 item = dict(self._review_queue_items[edit_idx])
                 item["diplomatic"] = nd
@@ -1595,7 +1671,8 @@ class App:
             _status(self, f"Autosaved {', '.join(saved)}")
 
     def _build_train(self) -> None:
-        tr = tk.LabelFrame(self.root, text="Train", font=("", 9))
+        parent = getattr(self, "_bottom_section", self.root)
+        tr = tk.LabelFrame(parent, text="Train", font=("", 9))
         tr.pack(side=tk.TOP, fill=tk.X, padx=4, pady=2)
         self._review_frame.pack(side=tk.TOP, fill=tk.X, padx=4, pady=2, before=tr)
         self._train_frame = tr
@@ -1670,11 +1747,12 @@ class App:
         )
         self._clear_queue_btn.grid(row=0, column=5, padx=(2, 2), pady=2)
         self._clear_queue_btn.grid_remove()  # Hidden by default
-        # Cancel button
+        # Cancel button (shown only while expansion is running; hidden when UI is free)
         self.cancel_btn = tk.Button(
             status_frame, text="Cancel", command=self._on_cancel_expand, state=tk.DISABLED, font=("", 9)
         )
         self.cancel_btn.grid(row=0, column=6, padx=(2, 4), pady=2)
+        self.cancel_btn.grid_remove()
 
     def _get_block_ranges_cached(self, content: str) -> list[tuple[int, int]]:
         """Block ranges for content, cached to avoid re-parsing on repeated clicks."""
@@ -2251,11 +2329,13 @@ class App:
             nonlocal completed, failed, cancelled
             self.expand_running = True
             self.cancel_requested = False
+            self.cancel_btn.grid()
             self.cancel_btn.config(state=tk.NORMAL)
 
             def on_done():
                 self.expand_running = False
                 self.cancel_btn.config(state=tk.DISABLED)
+                self.cancel_btn.grid_remove()
                 try:
                     self.progress_bar.stop()
                 except Exception:
@@ -2357,6 +2437,7 @@ class App:
         _stop_hang_check(self)
         self.expand_btn.config(state=tk.NORMAL)
         self.cancel_btn.config(state=tk.DISABLED)
+        self.cancel_btn.grid_remove()
         try:
             self.progress_bar.stop()
         except Exception:
@@ -2574,10 +2655,10 @@ class App:
             ]
         self.train_list.config(state=tk.NORMAL)
         self.train_list.delete("1.0", tk.END)
-        if search and total:
-            self.train_list.insert(tk.END, f"  ({len(examples)} of {total} pairs)\n")
-        for e in examples:
-            self.train_list.insert(tk.END, f"  {e['diplomatic']!r} → {e['full']!r}\n")
+        if examples:
+            header = f"  ({len(examples)} of {total} pairs)\n" if search and total else ""
+            body = "".join(f"  {e['diplomatic']!r} → {e['full']!r}\n" for e in examples)
+            self.train_list.insert(tk.END, header + body)
         self.train_list.config(state=tk.DISABLED)
 
     def _selection_from(self, widget: tk.Text) -> str:

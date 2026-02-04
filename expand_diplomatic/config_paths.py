@@ -34,3 +34,8 @@ def get_personal_learned_path() -> Path:
 def get_review_queue_path() -> Path:
     """Path to the persisted review queue (staged pairs awaiting accept/reject)."""
     return get_config_dir() / "review_queue.json"
+
+
+def get_rejected_suggestions_path() -> Path:
+    """Path to rejected-suggestions state (individual reject cooldown)."""
+    return get_config_dir() / "rejected_suggestions.json"

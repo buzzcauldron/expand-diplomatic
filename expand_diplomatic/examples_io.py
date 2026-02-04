@@ -110,6 +110,14 @@ _DASHES = {
 _SINGLE_QUOTES = {"\u2018", "\u2019", "\u201b", "\u2032"}
 _DOUBLE_QUOTES = {"\u201c", "\u201d", "\u201f", "\u2033"}
 
+# One-shot translation for appearance_key (dashes, quotes, spaces)
+_APPEARANCE_KEY_TRANS = str.maketrans(
+    {ch: "-" for ch in _DASHES}
+    | {ch: "'" for ch in _SINGLE_QUOTES}
+    | {ch: '"' for ch in _DOUBLE_QUOTES}
+    | {"\u00a0": " ", "\u202f": " ", "\u2009": " "}
+)
+
 
 def appearance_key(text: str) -> str:
     """Normalize text for "looks the same" matching (not strict Unicode equality).
@@ -120,20 +128,9 @@ def appearance_key(text: str) -> str:
     if text is None:
         return ""
     normalized = str(text)
-    # Compatibility fold (e.g. ligatures, fullwidth), then strip zero-width.
     normalized = unicodedata.normalize("NFKC", normalized)
     normalized = "".join(ch for ch in normalized if ch not in _ZERO_WIDTH)
-    # Fold common punctuation lookalikes.
-    for ch in _DASHES:
-        normalized = normalized.replace(ch, "-")
-    for ch in _SINGLE_QUOTES:
-        normalized = normalized.replace(ch, "'")
-    for ch in _DOUBLE_QUOTES:
-        normalized = normalized.replace(ch, '"')
-    normalized = normalized.replace("\u00a0", " ")  # NBSP
-    normalized = normalized.replace("\u202f", " ")  # NNBSP
-    normalized = normalized.replace("\u2009", " ")  # thin space
-    # Collapse whitespace and trim.
+    normalized = normalized.translate(_APPEARANCE_KEY_TRANS)
     normalized = _WS_RE.sub(" ", normalized).strip()
     return normalized
 

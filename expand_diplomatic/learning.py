@@ -8,7 +8,14 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .config_paths import get_personal_learned_path, get_review_queue_path
+from .config_paths import (
+    get_personal_learned_path,
+    get_rejected_suggestions_path,
+    get_review_queue_path,
+)
+
+# Cooldown: do not re-suggest individually rejected keys for this many document runs
+REJECT_COOLDOWN_RUNS = 4
 
 # Minimum length for diplomatic/full to avoid junk
 _MIN_DIP_LEN = 1
@@ -87,12 +94,11 @@ def queue_items_to_word_level(items: list[dict[str, Any]]) -> list[dict[str, Any
         full = (item.get("full") or "").strip()
         if not dip or not full:
             continue
-        # Already single-word (no space)
         if " " not in dip and " " not in full:
             result.append(dict(item))
             continue
         word_pairs = pairs_to_word_level([{"diplomatic": dip, "full": full}])
-        extra = {k: v for k, v in item.items() if k not in ("diplomatic", "full")}
+        extra = {k: item[k] for k in item if k not in ("diplomatic", "full")}
         for wp in word_pairs:
             result.append({"diplomatic": wp["diplomatic"], "full": wp["full"], **extra})
     return result
@@ -106,6 +112,49 @@ def save_review_queue(items: list[dict[str, Any]], path: Path | None = None) -> 
         json.dump(items, f, indent=2, ensure_ascii=False)
 
 
+def _load_rejected_suggestions(path: Path | None = None) -> dict[str, Any]:
+    """Load rejected-suggestions state: run_count and rejected key -> run when rejected."""
+    p = path or get_rejected_suggestions_path()
+    if not p.exists():
+        return {"run_count": 0, "rejected": {}}
+    try:
+        with open(p, encoding="utf-8") as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return {"run_count": 0, "rejected": {}}
+    if not isinstance(data, dict):
+        return {"run_count": 0, "rejected": {}}
+    run_count = data.get("run_count", 0) if isinstance(data.get("run_count"), (int, float)) else 0
+    rej = data.get("rejected")
+    if not isinstance(rej, dict):
+        rej = {}
+    return {"run_count": int(run_count), "rejected": {k: int(v) for k, v in rej.items() if isinstance(v, (int, float))}}
+
+
+def _save_rejected_suggestions(state: dict[str, Any], path: Path | None = None) -> None:
+    p = path or get_rejected_suggestions_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    with open(p, "w", encoding="utf-8") as f:
+        json.dump(state, f, indent=2, ensure_ascii=False)
+
+
+def increment_staging_run_count() -> None:
+    """Call after each document expand (when Learn runs). Used for individual-reject cooldown."""
+    state = _load_rejected_suggestions()
+    state["run_count"] = state.get("run_count", 0) + 1
+    # Drop rejected keys that are past cooldown to keep file small
+    run = state["run_count"]
+    state["rejected"] = {k: v for k, v in state.get("rejected", {}).items() if run - v < REJECT_COOLDOWN_RUNS}
+    _save_rejected_suggestions(state)
+
+
+def record_individual_reject(appearance_key: str) -> None:
+    """Record that the user rejected this suggestion (single Reject). Not used for Reject all."""
+    state = _load_rejected_suggestions()
+    state.setdefault("rejected", {})[appearance_key] = state.get("run_count", 0)
+    _save_rejected_suggestions(state)
+
+
 def add_to_review_queue(
     pairs: list[dict[str, str]],
     *,
@@ -113,35 +162,57 @@ def add_to_review_queue(
     path: Path | None = None,
     queue_path: Path | None = None,
 ) -> int:
-    """Append new pairs to the review queue after quality gates. Each pair gets source and timestamp.
-    Returns the number of items appended (after quality filter and dedup by appearance_key).
+    """Merge new pairs into the review queue: replace existing same-key with best guess, append new.
+    Skips keys that were individually rejected within the last REJECT_COOLDOWN_RUNS document runs.
+    Returns the number of items added or updated (for status message).
     """
     from .examples_io import appearance_key
 
     pairs = filter_quality(pairs)
     existing = load_review_queue(queue_path)
-    existing_keys = {appearance_key((e.get("diplomatic") or "").strip()) for e in existing}
+    state = _load_rejected_suggestions()
+    run_count = state.get("run_count", 0)
+    rejected = state.get("rejected", {})
+    rejected_in_cooldown = {k for k, v in rejected.items() if (run_count - v) < REJECT_COOLDOWN_RUNS}
+
+    # Map appearance_key -> index in existing (first occurrence)
+    key_to_index: dict[str, int] = {}
+    for i, e in enumerate(existing):
+        k = appearance_key((e.get("diplomatic") or "").strip())
+        if k not in key_to_index:
+            key_to_index[k] = i
+
     added = 0
+    updated = 0
+    ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    path_str = str(path) if path else None
+
     for pair in pairs:
         diplomatic = (pair.get("diplomatic") or "").strip()
         full = (pair.get("full") or "").strip()
         if not diplomatic or not full or diplomatic == full:
             continue
         key = appearance_key(diplomatic)
-        if key in existing_keys:
+        if key in rejected_in_cooldown:
             continue
-        existing_keys.add(key)
-        existing.append({
+        new_item = {
             "diplomatic": diplomatic,
             "full": full,
             "source": source,
-            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "path": str(path) if path else None,
-        })
-        added += 1
-    if added:
+            "timestamp": ts,
+            "path": path_str,
+        }
+        if key in key_to_index:
+            existing[key_to_index[key]] = new_item
+            updated += 1
+        else:
+            existing.append(new_item)
+            key_to_index[key] = len(existing) - 1
+            added += 1
+
+    if added or updated:
         save_review_queue(existing, queue_path)
-    return added
+    return added + updated
 
 
 def load_personal_learned(path: Path | None = None) -> list[dict[str, str]]:
