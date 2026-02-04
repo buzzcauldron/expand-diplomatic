@@ -774,10 +774,9 @@ class App:
             self.root.wm_iconname(_APP_NAME)  # Icon/taskbar name on hover
         except Exception:
             pass
-        # Default size chosen so the bottom status bar is visible on launch even with
-        # the multi-row top toolbar (users can still shrink after launch).
+        # Default size: show all toolbar rows, Review, Train, and status bar without fullscreen.
         self.root.minsize(700, 520)
-        self.root.geometry("950x680")
+        self.root.geometry("1000x780")
         self.root.resizable(True, True)
         _icon_path = ROOT_DIR / "stretch_armstrong_icon.png"
         if _icon_path.exists():
@@ -1199,8 +1198,10 @@ class App:
             self._review_list_frame, height=5, wrap=tk.WORD, state=tk.DISABLED,
             font=font9, bg="#fafafa", relief=tk.FLAT,
         )
+        self._review_listbox.tag_configure("selected", background="#cce0ff")
         self._review_listbox.pack(fill=tk.BOTH, expand=True, padx=0, pady=2)
         self._review_listbox.bind("<Button-1>", self._on_review_list_click)
+        self._review_listbox.bind("<Double-Button-1>", self._on_review_list_double_click)
         btns = tk.Frame(self._review_list_frame)
         btns.pack(fill=tk.X, pady=2)
         tk.Button(btns, text="Accept", width=7, command=self._review_accept, **btn_opts).pack(side=tk.LEFT, padx=2)
@@ -1233,17 +1234,19 @@ class App:
             self._review_list_expanded = True
 
     def _refresh_review_list(self) -> None:
-        from expand_diplomatic.learning import load_review_queue
+        from expand_diplomatic.learning import load_review_queue, queue_items_to_word_level
 
         search = (self._review_search_var.get() or "").strip().lower()
         raw = load_review_queue()
+        # Expand block-level pairs to word-level so list shows single word → word per line
+        expanded = queue_items_to_word_level(raw)
         if search:
             self._review_queue_items = [
-                e for e in raw
+                e for e in expanded
                 if search in (e.get("diplomatic") or "").lower() or search in (e.get("full") or "").lower()
             ]
         else:
-            self._review_queue_items = raw
+            self._review_queue_items = expanded
         self._review_summary_var.set(f"({len(self._review_queue_items)} staged)")
         self._review_listbox.config(state=tk.NORMAL)
         self._review_listbox.delete("1.0", tk.END)
@@ -1253,6 +1256,19 @@ class App:
             self._review_listbox.insert(tk.END, f"  {d} → {f}\n")
         self._review_listbox.config(state=tk.DISABLED)
         self._review_selected_index: int | None = None
+        self._update_review_selection_highlight()
+
+    def _update_review_selection_highlight(self) -> None:
+        """Highlight the currently selected line in the review list."""
+        try:
+            self._review_listbox.tag_remove("selected", "1.0", tk.END)
+            idx = getattr(self, "_review_selected_index", None)
+            if idx is not None and 0 <= idx < len(self._review_queue_items):
+                line_start = f"{idx + 1}.0"
+                line_end = f"{idx + 2}.0"
+                self._review_listbox.tag_add("selected", line_start, line_end)
+        except Exception:
+            pass
 
     def _on_review_list_click(self, event: tk.Event) -> None:
         if not self._review_queue_items:
@@ -1262,6 +1278,21 @@ class App:
             line_num = int(line.split(".")[0])
             if 1 <= line_num <= len(self._review_queue_items):
                 self._review_selected_index = line_num - 1
+                self._update_review_selection_highlight()
+        except (ValueError, IndexError):
+            pass
+
+    def _on_review_list_double_click(self, event: tk.Event) -> None:
+        """Double-click opens Edit dialog for the clicked pair."""
+        if not self._review_queue_items:
+            return
+        line = self._review_listbox.index(f"@{event.x},{event.y}")
+        try:
+            line_num = int(line.split(".")[0])
+            if 1 <= line_num <= len(self._review_queue_items):
+                self._review_selected_index = line_num - 1
+                self._update_review_selection_highlight()
+                self._review_edit()
         except (ValueError, IndexError):
             pass
 
@@ -1301,26 +1332,24 @@ class App:
             personal = load_personal_learned()
             personal.append({"diplomatic": diplomatic, "full": full})
             save_personal_learned(personal)
-        queue = load_review_queue()
-        queue = [e for e in queue if (e.get("diplomatic") or "").strip() != diplomatic or (e.get("full") or "").strip() != full]
-        save_review_queue(queue)
+        # Remove accepted item from in-memory list (word-level) and persist
+        idx = getattr(self, "_review_selected_index", None)
+        if idx is not None and 0 <= idx < len(self._review_queue_items):
+            self._review_queue_items.pop(idx)
+        save_review_queue(self._review_queue_items)
         self._refresh_review_list()
         self._refresh_train_list()
         _status(self, "Accepted and added to " + ("project examples" if promote_to_project else "personal learned"))
 
     def _review_reject(self) -> None:
-        from expand_diplomatic.learning import load_review_queue, save_review_queue
+        from expand_diplomatic.learning import save_review_queue
 
         idx = getattr(self, "_review_selected_index", None)
         if idx is None or idx < 0 or idx >= len(self._review_queue_items):
             messagebox.showinfo("Review", "Select a pair in the list first.", parent=self.root)
             return
-        item = self._review_queue_items[idx]
-        diplomatic = (item.get("diplomatic") or "").strip()
-        full = (item.get("full") or "").strip()
-        queue = load_review_queue()
-        queue = [e for e in queue if (e.get("diplomatic") or "").strip() != diplomatic or (e.get("full") or "").strip() != full]
-        save_review_queue(queue)
+        self._review_queue_items.pop(idx)
+        save_review_queue(self._review_queue_items)
         self._refresh_review_list()
         _status(self, "Rejected")
 
@@ -1345,17 +1374,18 @@ class App:
         tk.Entry(frm, textvariable=full_var, width=40, font=("", 9)).grid(row=1, column=1, padx=2, pady=2)
 
         def save_edit() -> None:
-            from expand_diplomatic.learning import load_review_queue, save_review_queue
+            from expand_diplomatic.learning import save_review_queue
             nd, nf = dip_var.get().strip(), full_var.get().strip()
             if not nd or not nf:
                 return
-            queue = load_review_queue()
-            for e in queue:
-                if (e.get("diplomatic") or "").strip() == d:
-                    e["diplomatic"] = nd
-                    e["full"] = nf
-                    break
-            save_review_queue(queue)
+            # Update in-memory list (word-level) and persist
+            edit_idx = getattr(self, "_review_selected_index", None)
+            if edit_idx is not None and 0 <= edit_idx < len(self._review_queue_items):
+                item = dict(self._review_queue_items[edit_idx])
+                item["diplomatic"] = nd
+                item["full"] = nf
+                self._review_queue_items[edit_idx] = item
+            save_review_queue(self._review_queue_items)
             win.destroy()
             self._refresh_review_list()
 
