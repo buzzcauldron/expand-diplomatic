@@ -1755,18 +1755,23 @@ class App:
         self.cancel_btn.grid_remove()
 
     def _get_block_ranges_cached(self, content: str) -> list[tuple[int, int]]:
-        """Block ranges for content, cached to avoid re-parsing on repeated clicks."""
+        """Block ranges for content, cached to avoid re-parsing on repeated clicks.
+        For large content (>64K chars), cache key is (len, hash) to avoid storing huge strings."""
         cache = getattr(self, "_block_ranges_cache", None)
         if cache is None:
             self._block_ranges_cache = {}
             cache = self._block_ranges_cache
-        if content in cache:
-            return cache[content]
+        if len(content) > 65536:
+            key: str | tuple[int, int] = (len(content), hash(content))
+        else:
+            key = content
+        if key in cache:
+            return cache[key]
         from expand_diplomatic.expander import get_block_ranges
         ranges = get_block_ranges(content)
         if len(cache) >= 4:  # Keep input+output for both panels
             cache.clear()
-        cache[content] = ranges
+        cache[key] = ranges
         return ranges
 
     def _get_block_at_click(self, widget: tk.Text, event: tk.Event) -> tuple[int | None, list[tuple[int, int]], str]:

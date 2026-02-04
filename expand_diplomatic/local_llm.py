@@ -32,6 +32,7 @@ def run_local_rules(
     Pass sorted_pairs to skip per-call sort when same examples used for many blocks.
     Text and diplomatic keys are normalized to NFC so NFD forms (e.g. "grã" vs "grã")
     match and replacements work regardless of Unicode encoding.
+    Uses a single regex pass for all pairs to avoid O(n_pairs) scans over the text.
     """
     if not text or not text.strip():
         return text
@@ -45,17 +46,42 @@ def run_local_rules(
         )
     else:
         return text
-    out = unicodedata.normalize("NFC", text)
+    # Filter and build replacement map; skip invalid so we don't add empty pattern
+    replacement: dict[str, str] = {}
+    pattern_parts: list[str] = []
     for d, f in pairs:
         if not d or not f:
-            continue  # skip invalid pairs; never replace with empty (preserve accuracy)
-        # If d is a prefix of f (e.g. "gra" in "gratia"), avoid replacing inside f
+            continue
+        if d in replacement:
+            continue  # keep longest-first: first (longer) wins
+        replacement[d] = f
         if len(f) > len(d) and f.startswith(d):
             suffix = f[len(d):]
-            out = re.sub(re.escape(d) + "(?!" + re.escape(suffix) + ")", f, out)
+            pattern_parts.append(re.escape(d) + "(?!" + re.escape(suffix) + ")")
         else:
-            out = out.replace(d, f)
-    return out
+            pattern_parts.append(re.escape(d))
+    if not pattern_parts:
+        return unicodedata.normalize("NFC", text)
+    # Single pass: one regex, one scan over text
+    combined = "|".join(pattern_parts)
+    try:
+        pat = re.compile(combined)
+    except re.error:
+        # Fallback to per-pair replacement if regex is huge or invalid
+        out = unicodedata.normalize("NFC", text)
+        for d, f in replacement.items():
+            if len(f) > len(d) and f.startswith(d):
+                suffix = f[len(d):]
+                out = re.sub(re.escape(d) + "(?!" + re.escape(suffix) + ")", f, out)
+            else:
+                out = out.replace(d, f)
+        return out
+    out = unicodedata.normalize("NFC", text)
+
+    def repl(m: re.Match[str]) -> str:
+        return replacement.get(m.group(0), m.group(0))
+
+    return pat.sub(repl, out)
 
 
 def run_ollama(

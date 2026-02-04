@@ -85,8 +85,9 @@ print('Created', ico)
 " 2>/dev/null || true
 fi
 
-# Create setup_msi.py for cx_Freeze
-cat > "$PROJECT_ROOT/setup_msi.py" << 'SETUP_EOF'
+# Create setup_msi.py for cx_Freeze (version from pyproject.toml, same as deb/rpm)
+VERSION_MSI=$(grep '^version = ' "$PROJECT_ROOT/pyproject.toml" | cut -d'"' -f2)
+cat > "$PROJECT_ROOT/setup_msi.py" << SETUP_EOF
 """
 cx_Freeze setup for Windows MSI installer.
 """
@@ -94,13 +95,8 @@ import sys
 from pathlib import Path
 from cx_Freeze import setup, Executable
 
-# Read version (fallback should match expand_diplomatic/_version.py)
-version_file = Path(__file__).parent / "expand_diplomatic" / "_version.py"
-version = "0.3.3"
-for line in version_file.read_text().splitlines():
-    if line.startswith("__version__"):
-        version = line.split("=")[1].strip().strip('"').strip("'")
-        break
+# Version from pyproject.toml (keep in sync with deb/rpm)
+version = "${VERSION_MSI}"
 
 # Read README for description
 readme = Path(__file__).parent / "README.md"

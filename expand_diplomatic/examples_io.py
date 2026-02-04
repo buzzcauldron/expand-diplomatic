@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import heapq
 import json
 import re
 import unicodedata
@@ -65,13 +66,9 @@ def select_examples_for_prompt(
         return list(examples)
     if strategy == "most-recent":
         return list(examples[-max_examples:])
-    # longest-first: sort by len(diplomatic) descending, take first max_examples
-    sorted_list = sorted(
-        examples,
-        key=lambda e: len((e.get("diplomatic") or "").strip()),
-        reverse=True,
-    )
-    return sorted_list[:max_examples]
+    # longest-first: nlargest avoids full sort when len(examples) >> max_examples
+    key_fn = lambda e: len((e.get("diplomatic") or "").strip())
+    return heapq.nlargest(max_examples, examples, key=key_fn)
 
 
 def get_learned_path(examples_path: str | Path) -> Path:
