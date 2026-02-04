@@ -169,7 +169,7 @@ def _schedule_auto_learn(
     model: str | None = None,
 ) -> None:
     """Stage extracted pairs into the review queue when Learn is ticked and Gemini was used.
-    Pairs from main examples.json are not staged (huge weight: never overwrite with Gemini guesses)."""
+    Pairs that already exist in the rules (project + learned + personal, per Layered Training) are not staged."""
     def learn() -> None:
         try:
             from expand_diplomatic.examples_io import appearance_key
@@ -181,9 +181,11 @@ def _schedule_auto_learn(
             pairs = pairs_to_word_level(block_pairs)
             if not pairs:
                 return
-            main_examples = load_examples(examples_path, include_learned=False, include_personal_learned=False)
-            local_keys = {appearance_key((e.get("diplomatic") or "").strip()) for e in main_examples if e.get("diplomatic")}
-            pairs = [p for p in pairs if appearance_key((p.get("diplomatic") or "").strip()) not in local_keys]
+            # Exclude pairs already in the effective rules (same layers as expand uses)
+            include_learned = bool(getattr(app, "include_learned_var", None) and app.include_learned_var.get())
+            rules_examples = load_examples(examples_path, include_learned=include_learned, include_personal_learned=True)
+            rules_keys = {appearance_key((e.get("diplomatic") or "").strip()) for e in rules_examples if e.get("diplomatic")}
+            pairs = [p for p in pairs if appearance_key((p.get("diplomatic") or "").strip()) not in rules_keys]
             if not pairs:
                 return
             path = getattr(app, "last_input_path", None)
@@ -698,6 +700,7 @@ def _run_expand_internal(
     except (ValueError, AttributeError):
         passes = 1
     _status(app, "Expanding…")
+    app._ensure_status_visible()
     # Update Expand button text to show queue status
     app._update_expand_button_text()
     app.last_expand_xml = xml
@@ -1032,7 +1035,30 @@ class App:
         self.root.bind("<Control-e>", lambda e: (self._on_expand(), "break")[1])
         self.root.bind("<Control-Left>", lambda e: (self._on_prev_file(), "break")[1])
         self.root.bind("<Control-Right>", lambda e: (self._on_next_file(), "break")[1])
+        # Mouse wheel scroll in all windows (input/output, batch file list, review, train, dialogs)
+        self.root.bind_all("<MouseWheel>", self._on_mousewheel, add=True)
+        self.root.bind_all("<Button-4>", self._on_mousewheel, add=True)
+        self.root.bind_all("<Button-5>", self._on_mousewheel, add=True)
         self._on_backend_change(self.backend_var.get())
+
+    def _on_mousewheel(self, event: tk.Event) -> str | None:
+        """Route mouse wheel to the scrollable widget under the cursor. Works for all panels and dialogs."""
+        top = event.widget.winfo_toplevel()
+        try:
+            rx = event.x_root - top.winfo_rootx()
+            ry = event.y_root - top.winfo_rooty()
+            w = top.winfo_containing(rx, ry)
+        except Exception:
+            return None
+        while w:
+            if hasattr(w, "yview") and callable(getattr(w, "yview", None)):
+                if event.num == 5 or (getattr(event, "delta", 0) < 0):
+                    w.yview_scroll(1, "units")
+                else:
+                    w.yview_scroll(-1, "units")
+                return "break"
+            w = w.master if hasattr(w, "master") else None
+        return None
 
     def _on_toolbar_canvas_configure(self, event: tk.Event) -> None:
         """Schedule toolbar scroll update (throttled) so resize doesn't hammer layout."""
@@ -1723,8 +1749,12 @@ class App:
 
     def _build_status(self) -> None:
         status_frame = tk.Frame(self.root, relief=tk.FLAT, bd=0)
-        status_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=4, pady=2)
         status_frame.columnconfigure(1, weight=1)
+        # Keep reference; show status bar when user hits Expand and keep it visible
+        self._status_frame = status_frame
+        self._status_frame_pack = {"side": tk.BOTTOM, "fill": tk.X, "padx": 4, "pady": 2}
+        status_frame.pack(**self._status_frame_pack)
+        status_frame.pack_forget()  # Start hidden; shown on first Expand
         # Status message
         tk.Label(status_frame, textvariable=self.status_var, anchor=tk.W, font=("", 9)).grid(
             row=0, column=0, sticky=tk.W, padx=(4, 8), pady=2
@@ -1762,6 +1792,11 @@ class App:
         )
         self.cancel_btn.grid(row=0, column=6, padx=(2, 4), pady=2)
         self.cancel_btn.grid_remove()
+
+    def _ensure_status_visible(self) -> None:
+        """Show the status bar (e.g. when user hits Expand) and keep it visible."""
+        if getattr(self, "_status_frame", None) is not None and not self._status_frame.winfo_ismapped():
+            self._status_frame.pack(**self._status_frame_pack)
 
     def _get_block_ranges_cached(self, content: str) -> list[tuple[int, int]]:
         """Block ranges for content, cached to avoid re-parsing on repeated clicks.
