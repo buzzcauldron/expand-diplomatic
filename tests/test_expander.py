@@ -60,6 +60,15 @@ def test_expand_xml_local() -> None:
     assert "the" in out or "same" in out
 
 
+def test_expand_xml_rules() -> None:
+    """Rules-only backend expands via examples only (no Ollama)."""
+    xml = '<?xml version="1.0"?><root><p>y^e same</p></root>'
+    ex = [{"diplomatic": "y^e", "full": "the"}]
+    out = expand_xml(xml, ex, backend="rules")
+    assert "the" in out
+    assert "y^e" not in out
+
+
 def test_expand_xml_invalid_raises() -> None:
     """Invalid/non-XML input raises clear error (lxml recover=True can return None)."""
     import pytest

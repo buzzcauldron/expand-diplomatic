@@ -26,6 +26,8 @@ def _get_max_concurrent(backend: str) -> int:
             return max(1, min(16, int(v)))
         except ValueError:
             pass
+    if backend == "rules":
+        return 8
     if backend == "local":
         try:
             from .gpu_detect import detect_high_end_gpu
@@ -143,6 +145,30 @@ def extract_expansion_pairs(
         if dip != full and dip and full:
             pairs.append({"diplomatic": dip, "full": full})
     return pairs
+
+
+def pairs_to_word_level(pairs: list[dict[str, str]]) -> list[dict[str, str]]:
+    """
+    Expand block-level (diplomatic, full) pairs into word-level pairs.
+    Splits each block on whitespace; when diplomatic and full have the same number
+    of words, emits one pair per word that changed. When counts differ, keeps the
+    block as a single pair so nothing is lost.
+    """
+    result: list[dict[str, str]] = []
+    for p in pairs:
+        dip = (p.get("diplomatic") or "").strip()
+        full = (p.get("full") or "").strip()
+        if not dip or not full:
+            continue
+        dip_words = dip.split()
+        full_words = full.split()
+        if len(dip_words) == len(full_words):
+            for dw, fw in zip(dip_words, full_words):
+                if dw != fw and dw and fw:
+                    result.append({"diplomatic": dw, "full": fw})
+        else:
+            result.append({"diplomatic": dip, "full": full})
+    return result
 
 
 def extract_text_lines(xml_source: str, block_tags: set[str] | None = None) -> str:
@@ -364,6 +390,9 @@ def _expand_text_block(
 ) -> str:
     if not text or not text.strip():
         return text
+    if backend == "rules":
+        from .local_llm import run_local_rules
+        return run_local_rules(text, examples=examples, sorted_pairs=sorted_pairs)
     if backend == "local":
         from .local_llm import run_local, run_local_rules
 
@@ -425,6 +454,8 @@ def expand_xml(
     passes: int = 1,
     cancel_check: Callable[[], bool] | None = None,
     whole_document: bool = False,
+    max_examples: int | None = None,
+    example_strategy: str = "longest-first",
 ) -> str:
     """
     Parse XML, expand text inside block elements via LLM, return modified XML string.
@@ -445,6 +476,8 @@ def expand_xml(
     - passes: number of expansion passes (default 1). When > 1, re-expands output to refine further.
     - cancel_check: optional () -> bool; if returns True, expansion stops and raises ExpandCancelled.
     - whole_document: when True and backend=gemini, expand entire document in one API call (default False).
+    - max_examples: cap on examples injected into prompt (None = use all).
+    - example_strategy: 'longest-first' or 'most-recent' for selecting which examples to include.
     """
     if model is None:
         model = _DEFAULT_GEMINI
@@ -474,6 +507,8 @@ def expand_xml(
             max_concurrent=max_concurrent,
             cancel_check=cancel_check,
             whole_document=whole_document,
+            max_examples=max_examples,
+            example_strategy=example_strategy,
         )
         if cancel_check is not None and cancel_check():
             raise ExpandCancelled("Expansion cancelled by user.")
@@ -499,10 +534,15 @@ def _expand_once(
     max_concurrent: int | None = None,
     cancel_check: Callable[[], bool] | None = None,
     whole_document: bool = False,
+    max_examples: int | None = None,
+    example_strategy: str = "longest-first",
 ) -> str:
     """Single expansion pass. Used internally by expand_xml for recursive correction."""
     if model is None:
         model = _DEFAULT_GEMINI
+
+    from .examples_io import select_examples_for_prompt
+    prompt_examples = select_examples_for_prompt(examples, max_examples=max_examples, strategy=example_strategy)
 
     if whole_document and backend == "gemini" and not dry_run:
         # When examples_path provided, upload examples file and pass [ex_file, xml]; else use input_file_path for XML if set
@@ -514,7 +554,7 @@ def _expand_once(
         try:
             return _expand_whole_document(
                 xml_source,
-                examples,
+                prompt_examples,
                 model=model,
                 api_key=api_key,
                 modality=modality,
@@ -572,11 +612,17 @@ def _expand_once(
     sorted_pairs: list[tuple[str, str]] | None = None
     if not dry_run and total > 0:
         prompt_prefix = (
-            _build_prompt_prefix_examples_only(examples)
+            _build_prompt_prefix_examples_only(prompt_examples)
             if backend == "gemini"
-            else _build_prompt_prefix(examples, modality)
+            else _build_prompt_prefix(prompt_examples, modality)
         )
-        if backend == "local" and examples:
+        if backend == "local" and prompt_examples:
+            sorted_pairs = sorted(
+                [(unicodedata.normalize("NFC", ex["diplomatic"]), ex["full"]) for ex in prompt_examples],
+                key=lambda p: len(p[0]),
+                reverse=True,
+            )
+        if backend == "rules" and examples:
             sorted_pairs = sorted(
                 [(unicodedata.normalize("NFC", ex["diplomatic"]), ex["full"]) for ex in examples],
                 key=lambda p: len(p[0]),
