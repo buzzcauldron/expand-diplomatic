@@ -75,6 +75,29 @@ def load_review_queue(path: Path | None = None) -> list[dict[str, Any]]:
     return [item for item in data if isinstance(item, dict) and "diplomatic" in item and "full" in item]
 
 
+def queue_items_to_word_level(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Expand any multi-word queue items to one word→word pair per line.
+    Preserves source, timestamp, path on each resulting item. Use for display
+    so the review list shows paired single words only."""
+    from .expander import pairs_to_word_level
+
+    result: list[dict[str, Any]] = []
+    for item in items:
+        dip = (item.get("diplomatic") or "").strip()
+        full = (item.get("full") or "").strip()
+        if not dip or not full:
+            continue
+        # Already single-word (no space)
+        if " " not in dip and " " not in full:
+            result.append(dict(item))
+            continue
+        word_pairs = pairs_to_word_level([{"diplomatic": dip, "full": full}])
+        extra = {k: v for k, v in item.items() if k not in ("diplomatic", "full")}
+        for wp in word_pairs:
+            result.append({"diplomatic": wp["diplomatic"], "full": wp["full"], **extra})
+    return result
+
+
 def save_review_queue(items: list[dict[str, Any]], path: Path | None = None) -> None:
     """Persist the review queue to disk."""
     p = path or get_review_queue_path()
