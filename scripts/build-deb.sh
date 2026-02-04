@@ -1,14 +1,34 @@
 #!/usr/bin/env bash
 # Build DEB package for Debian/Ubuntu
 # Requires: dpkg-deb, fakeroot (optional)
-# Usage: ./scripts/build-deb.sh
+# Usage: ./scripts/build-deb.sh [--install-deps]
+#   --install-deps    Install build dependencies with apt (uses sudo)
 # Output: dist/*.deb
+#
+# Supported (Python 3.10+): Debian 12+ (Bookworm), Ubuntu 22.04+ (Jammy), and derivatives
+# (Mint, Pop!_OS, etc.). Older Debian/Ubuntu lack python3.10 in default repos.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$PROJECT_ROOT"
+
+INSTALL_DEPS=0
+for arg in "$@"; do
+    case "$arg" in
+        --install-deps|-i) INSTALL_DEPS=1 ;;
+        *) echo "Unknown option: $arg. Usage: $0 [--install-deps]" >&2; exit 1 ;;
+    esac
+done
+
+if [[ $INSTALL_DEPS -eq 1 ]]; then
+    echo "Installing build dependencies (apt)..."
+    sudo apt-get update -qq
+    sudo apt-get install -y dpkg-dev
+    echo "Build dependencies installed."
+    echo ""
+fi
 
 # Check for dpkg-deb
 if ! command -v dpkg-deb &> /dev/null; then

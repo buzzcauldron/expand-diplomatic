@@ -430,6 +430,38 @@ def _focus_main(app: "App") -> None:
         pass
 
 
+def _ask_yesno(parent: tk.Tk | tk.Toplevel, title: str, message: str) -> bool:
+    """Modal Yes/No dialog using app font ("" 9) so it matches the rest of the UI."""
+    font9 = ("", 9)
+    result = [None]
+
+    win = tk.Toplevel(parent)
+    win.title(title)
+    win.transient(parent)
+    win.grab_set()
+    f = tk.Frame(win, padx=12, pady=10)
+    f.pack(fill=tk.BOTH, expand=True)
+    tk.Label(f, text=message, font=font9, justify=tk.LEFT, wraplength=420).pack(anchor=tk.W)
+    btns = tk.Frame(f)
+    btns.pack(fill=tk.X, pady=(10, 0))
+
+    def on_yes() -> None:
+        result[0] = True
+        win.grab_release()
+        win.destroy()
+
+    def on_no() -> None:
+        result[0] = False
+        win.grab_release()
+        win.destroy()
+
+    tk.Button(btns, text="Yes", font=font9, command=on_yes, width=6).pack(side=tk.LEFT, padx=(0, 4))
+    tk.Button(btns, text="No", font=font9, command=on_no, width=6).pack(side=tk.LEFT)
+    win.protocol("WM_DELETE_WINDOW", on_no)
+    win.wait_window()
+    return result[0] is True
+
+
 def _show_api_key_dialog(
     app: "App",
     title: str = "Enter API key",
@@ -780,22 +812,36 @@ class App:
         # Top third: toolbar fills width and moves with window resizing; essential row always visible
         toolbar_wrapper = tk.Frame(self.root, relief=tk.FLAT, bd=0)
         toolbar_wrapper.pack(side=tk.TOP, fill=tk.X, padx=2, pady=2)
-        pad = dict(padx=2, pady=2)
-        opts = {"font": ("", 9), "takefocus": True}
+        pad = dict(padx=2, pady=2)  # external spacing
+        # Make controls less cramped: consistent font + internal padding
+        font9 = ("", 9)
+        opts = {"font": font9, "takefocus": True}
+        btn_opts = {"font": font9, "takefocus": True, "padx": 6, "pady": 2}
+
+        def _style_option_menu(om: tk.OptionMenu) -> None:
+            # OptionMenu wraps a Menubutton + Menu; make hit target bigger and consistent.
+            try:
+                om.configure(font=font9, takefocus=True, padx=6, pady=2, relief=tk.RAISED, bd=1, highlightthickness=0)
+            except Exception:
+                pass
+            try:
+                om["menu"].configure(font=font9, tearoff=0)
+            except Exception:
+                pass
         # Essential row (fixed): Open, Batch, Expand, Re-expand, Save, prev/next — always visible
         essential_row = tk.Frame(toolbar_wrapper, relief=tk.FLAT, bd=0)
         essential_row.pack(side=tk.TOP, fill=tk.X)
         for w in [
-            (tk.Button, "Open", self._on_open, {"width": 4}),
+            (tk.Button, "Open", self._on_open, {"width": 6}),
             (tk.Button, "Batch…", self._on_batch, {"width": 6}),
-            (tk.Button, "Expand", self._on_expand, {"width": 5}),
+            (tk.Button, "Expand", self._on_expand, {"width": 6}),
             (tk.Button, "Re-expand", self._on_reexpand, {"width": 8}),
-            (tk.Button, "Save", self._on_save, {"width": 4}),
+            (tk.Button, "Save", self._on_save, {"width": 6}),
             (tk.Button, "◀", self._on_prev_file, {"width": 2}),
             (tk.Button, "▶", self._on_next_file, {"width": 2}),
         ]:
             cls, txt, cmd, kw = w
-            btn = cls(essential_row, text=txt, command=cmd, **{**pad, **kw})
+            btn = cls(essential_row, text=txt, command=cmd, **{**btn_opts, **kw})
             btn.pack(side=tk.LEFT, **pad)
             if txt == "Expand":
                 self.expand_btn = btn
@@ -821,7 +867,7 @@ class App:
             (tk.Button, "Diff", self._on_diff, {"width": 4}),
         ]:
             cls, txt, cmd, kw = w
-            cls(r1, text=txt, command=cmd, **{**pad, **kw}).pack(side=tk.LEFT, **pad)
+            cls(r1, text=txt, command=cmd, **{**btn_opts, **kw}).pack(side=tk.LEFT, **pad)
         # Row 1: Settings (grid so Examples entry expands)
         r2 = tk.Frame(bar)
         r2.pack(side=tk.TOP, fill=tk.X)
@@ -829,23 +875,28 @@ class App:
         col = 0
         tk.Label(r2, text="Backend", **opts).grid(row=0, column=col, **pad)
         col += 1
-        tk.OptionMenu(r2, self.backend_var, *BACKENDS, command=self._on_backend_change).grid(row=0, column=col, sticky=tk.W, **pad)
+        self._backend_menu = tk.OptionMenu(r2, self.backend_var, *BACKENDS, command=self._on_backend_change)
+        _style_option_menu(self._backend_menu)
+        self._backend_menu.grid(row=0, column=col, sticky=tk.W, **pad)
         col += 1
         self._model_label = tk.Label(r2, text="Model", **opts)
         self._model_label.grid(row=0, column=col, **pad)
         col += 1
         self._model_menu = tk.OptionMenu(r2, self.gemini_model_var, *GEMINI_MODELS)
+        _style_option_menu(self._model_menu)
         self._model_menu.grid(row=0, column=col, sticky=tk.W, **pad)
         # Rebuild with speed tick marks (more · = faster)
         _apply_model_menu_labels(self._model_menu, self.gemini_model_var, GEMINI_MODELS)
         _add_tooltip(self._model_menu, "Gemini model. More · = faster. Default = best value.")
         col += 1
-        self._model_refresh_btn = tk.Button(r2, text="⟳", width=2, command=self._on_refresh_models, **opts)
+        self._model_refresh_btn = tk.Button(r2, text="⟳", width=2, command=self._on_refresh_models, **btn_opts)
         self._model_refresh_btn.grid(row=0, column=col, **pad)
         col += 1
         tk.Label(r2, text="Mod", **opts).grid(row=0, column=col, **pad)
         col += 1
-        tk.OptionMenu(r2, self.modality_var, *MODALITIES).grid(row=0, column=col, sticky=tk.W, **pad)
+        self._modality_menu = tk.OptionMenu(r2, self.modality_var, *MODALITIES)
+        _style_option_menu(self._modality_menu)
+        self._modality_menu.grid(row=0, column=col, sticky=tk.W, **pad)
         col += 1
         tk.Label(r2, text="Simul.", **opts).grid(row=0, column=col, **pad)
         col += 1
@@ -853,6 +904,11 @@ class App:
         self.concurrent_var = tk.StringVar(value="2")
         self._concurrent_spinbox = tk.Spinbox(r2, from_=1, to=_conc_max, width=2, textvariable=self.concurrent_var)
         self._concurrent_spinbox.grid(row=0, column=col, sticky=tk.W, **pad)
+        col += 1
+        self.gemini_paid_key_var = tk.BooleanVar(value=False)
+        _paid_ck = tk.Checkbutton(r2, text="Paid key", variable=self.gemini_paid_key_var, **opts)
+        _paid_ck.grid(row=0, column=col, sticky=tk.W, **pad)
+        _add_tooltip(_paid_ck, "Gemini: allow parallel batch (check if using paid API key; uncheck for free tier to avoid rate limits).")
         col += 1
         tk.Label(r2, text="Pass", **opts).grid(row=0, column=col, **pad)
         col += 1
@@ -882,11 +938,11 @@ class App:
         self._examples_entry = tk.Entry(r2, textvariable=self.examples_var)
         self._examples_entry.grid(row=0, column=col, sticky=tk.EW, **pad)
         col += 1
-        tk.Button(r2, text="…", width=2, command=self._on_browse_examples).grid(row=0, column=col, **pad)
+        tk.Button(r2, text="…", width=2, command=self._on_browse_examples, **btn_opts).grid(row=0, column=col, **pad)
         col += 1
-        tk.Button(r2, text="Refresh", width=6, command=self._refresh_train_list).grid(row=0, column=col, **pad)
+        tk.Button(r2, text="Refresh", width=6, command=self._refresh_train_list, **btn_opts).grid(row=0, column=col, **pad)
         col += 1
-        tk.Button(r2, text="Test", width=4, command=self._on_test_connection).grid(row=0, column=col, **pad)
+        tk.Button(r2, text="Test", width=4, command=self._on_test_connection, **btn_opts).grid(row=0, column=col, **pad)
         # Keyboard shortcuts (Ctrl+O/S/E, Left/Right for prev/next file)
         self.root.bind("<Control-o>", lambda e: (self._on_open(), "break")[1])
         self.root.bind("<Control-s>", lambda e: (self._on_save(), "break")[1])
@@ -990,20 +1046,23 @@ class App:
 
     def _build_batch_panel(self) -> None:
         """Build collapsible batch file list panel (hidden by default)."""
-        self._batch_frame = tk.LabelFrame(self.root, text="Batch", font=("", 9))
+        font9 = ("", 9)
+        btn_opts = {"font": font9, "takefocus": True, "padx": 6, "pady": 2}
+        self._batch_frame = tk.LabelFrame(self.root, text="Batch", font=font9)
         header = tk.Frame(self._batch_frame, relief=tk.FLAT)
         header.pack(fill=tk.X, padx=2, pady=2)
         self._batch_toggle_btn = tk.Button(
-            header, text="▶", width=2, command=self._toggle_batch_list, font=("", 9),
+            header, text="▶", width=2, command=self._toggle_batch_list, **btn_opts,
         )
         self._batch_toggle_btn.pack(side=tk.LEFT, padx=2)
         self._batch_summary_var = tk.StringVar(value="")
-        tk.Label(header, textvariable=self._batch_summary_var, font=("", 9), anchor=tk.W).pack(side=tk.LEFT, padx=4)
-        tk.Button(header, text="✕", width=2, command=self._hide_batch_panel, font=("", 9)).pack(side=tk.RIGHT, padx=2)
+        tk.Label(header, textvariable=self._batch_summary_var, font=font9, anchor=tk.W).pack(side=tk.LEFT, padx=4)
+        tk.Button(header, text="✕", width=2, command=self._hide_batch_panel, **btn_opts).pack(side=tk.RIGHT, padx=2)
         self._batch_list_frame = tk.Frame(self._batch_frame, relief=tk.FLAT)
         self._batch_listbox = scrolledtext.ScrolledText(
             self._batch_list_frame, height=6, wrap=tk.NONE, state=tk.DISABLED,
-            font=("Courier", 9), bg="#fafafa", relief=tk.FLAT,
+            # Match overall UI font; list content is short filenames/status (monospace not required)
+            font=font9, bg="#fafafa", relief=tk.FLAT,
         )
         self._batch_listbox.pack(fill=tk.BOTH, expand=True, padx=0, pady=0)
         # Tags for status colors
@@ -1556,9 +1615,12 @@ class App:
                 parallel = max(1, min(8, parallel))
             except ValueError:
                 parallel = 2
-            model = self.gemini_model_var.get() if (self.backend_var.get() or "").strip() == "gemini" else ""
-            if (self.backend_var.get() or "").strip() == "gemini" and "pro" in (model or "").lower():
+            backend = (self.backend_var.get() or "gemini").strip() or "gemini"
+            model = self.gemini_model_var.get() if backend == "gemini" else ""
+            if backend == "gemini" and "pro" in (model or "").lower():
                 parallel = min(parallel, 2)
+            if backend == "gemini" and not self.gemini_paid_key_var.get():
+                parallel = 1
             self._batch_status = {f.name: "pending" for f in self._batch_files}
             self._update_batch_list()
             self._run_batch(self._batch_files, parallel)
@@ -1698,20 +1760,24 @@ class App:
         if backend == "gemini" and "pro" in (model or "").lower():
             parallel = min(parallel, 2)
 
+        # Gemini free tier rate-limits easily; allow parallel only when user indicates paid key.
+        if backend == "gemini" and not self.gemini_paid_key_var.get():
+            parallel = 1
+
         # Show file list in confirmation
         file_list_preview = "\n".join(f"  • {f.name}" for f in files[:10])
         if len(files) > 10:
             file_list_preview += f"\n  … and {len(files) - 10} more"
 
-        if not messagebox.askyesno(
-            "Batch expand",
+        batch_message = (
             f"Expand {len(files)} files in '{folder_path.name}'?\n\n"
             f"Files:\n{file_list_preview}\n\n"
             f"Parallel files: {parallel}\n"
             f"Backend: {backend}\n"
             f"Modality: {self.modality_var.get()}\n\n"
-            "Output: <filename>_expanded.xml in same folder",
-        ):
+            "Output: <filename>_expanded.xml in same folder"
+        )
+        if not _ask_yesno(self.root, "Batch expand", batch_message):
             return
 
         # Show batch panel and run
@@ -1741,8 +1807,9 @@ class App:
         failed = []
         cancelled = [False]
 
-        # Batch defaults to whole-doc (faster for many files)
-        whole_doc = True
+        # Batch uses the same Whole doc / Block-by-block setting as single-file Expand.
+        # Whole-doc is faster but can fail on very large files or model context limits.
+        whole_doc = bool(self.whole_document_var.get())
         ex_path = examples_path if (whole_doc and backend == "gemini" and not include_learned) else None
 
         def _is_timeout(e: BaseException) -> bool:
@@ -1750,6 +1817,11 @@ class App:
                 return True
             s = str(e).lower()
             return "timeout" in s or "timed out" in s
+
+        def _is_rate_limit(e: BaseException) -> bool:
+            s = str(e)
+            sl = s.lower()
+            return ("429" in sl) or ("resource_exhausted" in sl) or ("rate limit" in sl) or ("too many requests" in sl)
 
         def expand_one(f: Path) -> tuple[Path, bool, str]:
             # Mark as processing
@@ -1768,13 +1840,19 @@ class App:
                         modality=modality,
                         whole_document=whole_doc,
                         examples_path=ex_path,
+                        # Block-level concurrency (Gemini): allow only when paid key to avoid 429s.
+                        max_concurrent=(1 if (backend == "gemini" and not self.gemini_paid_key_var.get()) else None),
                     )
                     out_path.write_text(result, encoding="utf-8")
                     return (f, True, f.name)
                 except Exception as e:
                     if _is_timeout(e) and attempt < max_attempts - 1:
                         continue
-                    return (f, False, f"{f.name}: {e}")
+                    if _is_rate_limit(e) and attempt < max_attempts - 1:
+                        # Backoff then retry (helps on 429 bursts during batch)
+                        time.sleep(10 * (attempt + 1))
+                        continue
+                    return (f, False, f"{f.name}: {type(e).__name__}: {e}")
 
         def run_batch() -> None:
             nonlocal completed, failed, cancelled
@@ -2135,6 +2213,7 @@ class App:
             p["modality"] = self.modality_var.get().strip() or "full"
             p["gemini_model"] = self.gemini_model_var.get().strip() or ""
             p["concurrent"] = self.concurrent_var.get().strip() or "2"
+            p["gemini_paid_key"] = bool(self.gemini_paid_key_var.get())
             p["passes"] = self.passes_var.get().strip() or "1"
             p["whole_document"] = bool(self.whole_document_var.get())
             p["auto_learn"] = bool(self.auto_learn_var.get())
@@ -2163,6 +2242,8 @@ class App:
             conc = p.get("concurrent", "")
             if conc and conc.isdigit():
                 self.concurrent_var.set(conc)
+            if "gemini_paid_key" in p:
+                self.gemini_paid_key_var.set(bool(p["gemini_paid_key"]))
             passes = p.get("passes", "")
             if passes and passes.isdigit():
                 self.passes_var.set(passes)

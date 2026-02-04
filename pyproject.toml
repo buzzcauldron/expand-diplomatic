@@ -6,6 +6,8 @@ build-backend = "setuptools.build_meta"
 name = "expand-diplomatic"
 version = "0.3.3"
 description = "Expand diplomatic transcriptions to full form via Gemini API"
+# SPDX license expression (PEP 639)
+license = "MIT"
 # Semantic Versioning: https://semver.org — keep in sync with expand_diplomatic/_version.py
 readme = "README.md"
 requires-python = ">=3.10"
@@ -35,4 +37,5 @@ expand-diplomatic-gui = "gui:main"
 [tool.setuptools]
 py-modules = ["run_gemini", "gui"]
 packages = ["expand_diplomatic"]
+license-files = ["LICENSE"]
 

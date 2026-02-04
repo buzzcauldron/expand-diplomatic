@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Master build script - builds all package formats
-# Usage: ./scripts/build-all.sh [--rpm] [--deb] [--app] [--msi] [--zip] [--docker] [--packages]
+# Usage: ./scripts/build-all.sh [--rpm] [--deb] [--app] [--msi] [--zip] [--docker] [--packages] [--install-deps]
 #        ./scripts/build-all.sh  # Builds everything available on this platform
+#        --install-deps         Install build deps (sudo/pip) for each format before building
 
 set -euo pipefail
 
@@ -17,6 +18,7 @@ BUILD_MSI=0
 BUILD_ZIP=0
 BUILD_DOCKER=0
 BUILD_PACKAGES=0
+INSTALL_DEPS=0
 
 # Parse arguments
 if [[ $# -eq 0 ]]; then
@@ -47,14 +49,18 @@ else
             --zip) BUILD_ZIP=1 ;;
             --docker) BUILD_DOCKER=1 ;;
             --packages) BUILD_PACKAGES=1 ;;
+            --install-deps|-i) INSTALL_DEPS=1 ;;
             *)
                 echo "Unknown option: $arg"
-                echo "Usage: $0 [--rpm] [--deb] [--app] [--msi] [--zip] [--docker] [--packages]"
+                echo "Usage: $0 [--rpm] [--deb] [--app] [--msi] [--zip] [--docker] [--packages] [--install-deps]"
                 exit 1
                 ;;
         esac
     done
 fi
+
+DEPS_OPT=""
+[[ $INSTALL_DEPS -eq 1 ]] && DEPS_OPT="--install-deps"
 
 echo "========================================"
 echo "Expand Diplomatic - Build All Packages"
@@ -68,7 +74,7 @@ BUILT=()
 # Build Python packages (wheel + sdist)
 if [[ $BUILD_PACKAGES -eq 1 ]]; then
     echo "→ Building Python packages (wheel + sdist)..."
-    ./scripts/build-packages.sh
+    ./scripts/build-packages.sh $DEPS_OPT
     BUILT+=("Python packages (dist/*.whl, dist/*.tar.gz)")
     echo ""
 fi
@@ -77,7 +83,7 @@ fi
 if [[ $BUILD_RPM -eq 1 ]]; then
     if command -v rpmbuild &> /dev/null; then
         echo "→ Building RPM package..."
-        ./scripts/build-rpm.sh
+        ./scripts/build-rpm.sh $DEPS_OPT
         BUILT+=("RPM (rpmbuild/RPMS/)")
         echo ""
     else
@@ -90,7 +96,7 @@ fi
 if [[ $BUILD_DEB -eq 1 ]]; then
     if command -v dpkg-deb &> /dev/null; then
         echo "→ Building DEB package..."
-        ./scripts/build-deb.sh
+        ./scripts/build-deb.sh $DEPS_OPT
         BUILT+=("DEB (dist/*.deb)")
         echo ""
     else
@@ -103,7 +109,7 @@ fi
 if [[ $BUILD_APP -eq 1 ]]; then
     if [[ "$PLATFORM" == "Darwin" ]]; then
         echo "→ Building macOS .app bundle..."
-        ./scripts/build-macos-app.sh
+        ./scripts/build-macos-app.sh $DEPS_OPT
         BUILT+=("macOS App (dist/Expand-Diplomatic.app)")
         echo ""
     else
@@ -116,7 +122,7 @@ fi
 if [[ $BUILD_MSI -eq 1 ]]; then
     if [[ "$PLATFORM" =~ ^(MINGW|MSYS|CYGWIN) ]] || grep -qi microsoft /proc/version 2>/dev/null; then
         echo "→ Building Windows MSI installer..."
-        ./scripts/build-windows-msi.sh
+        ./scripts/build-windows-msi.sh $DEPS_OPT
         BUILT+=("Windows MSI + portable ZIP (dist/*.msi, dist/*.zip)")
         echo ""
     else
@@ -129,7 +135,7 @@ fi
 if [[ $BUILD_ZIP -eq 1 ]]; then
     if [[ "$PLATFORM" =~ ^(MINGW|MSYS|CYGWIN) ]] || grep -qi microsoft /proc/version 2>/dev/null; then
         echo "→ Building Windows portable ZIP..."
-        ./scripts/build-windows-zip.sh
+        ./scripts/build-windows-zip.sh $DEPS_OPT
         BUILT+=("Windows portable ZIP (dist/*.zip)")
         echo ""
     else

@@ -2,6 +2,19 @@
 
 This document describes how to build distribution packages for Expand Diplomatic.
 
+## Supported OS Versions
+
+| Format   | Build / run supported versions |
+|----------|--------------------------------|
+| **RPM**  | **Modern spec:** Fedora 35+, RHEL 9+, CentOS Stream 9+, Rocky Linux 9+, AlmaLinux 9+. **Legacy spec:** Fedora 30–42, RHEL 8 (when `pyproject-rpm-macros` is not installed). |
+| **DEB**  | Debian 12+ (Bookworm), Ubuntu 22.04+ (Jammy), and derivatives (Mint, Pop!_OS). Requires Python 3.10+. |
+| **macOS**| macOS 11 (Big Sur) through current; Intel and Apple Silicon. |
+| **Windows** | Windows 10, 11 (and Server equivalents). Build requires Python 3.10+ (on Windows or WSL2). |
+| **Docker** | Any host with Docker; images: `linux/amd64`, `linux/arm64`. |
+| **Python** | Wheel/sdist: all platforms with Python 3.10+. |
+
+The build scripts auto-detect where possible (e.g. RPM uses the modern spec on Fedora 35+ when `pyproject-rpm-macros` is present, otherwise the legacy spec).
+
 ## Quick Start
 
 ```bash
@@ -41,10 +54,14 @@ pip install dist/expand_diplomatic-*.whl
 - `rpm-build`
 - `python3-devel`
 - Linux system (RHEL, Fedora, CentOS, Rocky, Alma, etc.)
+- **Modern spec (Fedora 35+, RHEL 9+):** `pyproject-rpm-macros` plus `python3-setuptools` and `python3-wheel` so one `rpmbuild -ba` produces the RPM. If the script reports "Using legacy spec", you are on an older distro.
 
 **Install requirements:**
 ```bash
-# Fedora/RHEL 8+/Rocky/Alma
+# Fedora 35+ / RHEL 9+ / CentOS Stream 9+ (modern spec; produces .rpm in one run)
+sudo dnf install rpm-build python3-devel pyproject-rpm-macros python3-setuptools python3-wheel
+
+# Fedora 30–42 / RHEL 8 (legacy spec)
 sudo dnf install rpm-build python3-devel
 
 # CentOS 7
