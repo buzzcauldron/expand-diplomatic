@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import re
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -71,6 +73,47 @@ def _is_pro_model(model: str) -> bool:
     return model is not None and "pro" in (model or "").lower()
 
 
+_WS_RE = re.compile(r"\s+")
+_ZERO_WIDTH = {"\u200b", "\u200c", "\u200d", "\ufeff"}
+_DASHES = {
+    "\u2010",  # hyphen
+    "\u2011",  # non-breaking hyphen
+    "\u2012",  # figure dash
+    "\u2013",  # en dash
+    "\u2014",  # em dash
+    "\u2212",  # minus sign
+}
+_SINGLE_QUOTES = {"\u2018", "\u2019", "\u201b", "\u2032"}
+_DOUBLE_QUOTES = {"\u201c", "\u201d", "\u201f", "\u2033"}
+
+
+def appearance_key(text: str) -> str:
+    """Normalize text for "looks the same" matching (not strict Unicode equality).
+
+    Used to dedupe/attach training pairs even when the source text uses different
+    Unicode forms (e.g. decomposed accents, NBSP vs space, curly quotes, dash variants).
+    """
+    if text is None:
+        return ""
+    s = str(text)
+    # Compatibility fold (e.g. ligatures, fullwidth), then strip zero-width.
+    s = unicodedata.normalize("NFKC", s)
+    s = "".join(ch for ch in s if ch not in _ZERO_WIDTH)
+    # Fold common punctuation lookalikes.
+    for ch in _DASHES:
+        s = s.replace(ch, "-")
+    for ch in _SINGLE_QUOTES:
+        s = s.replace(ch, "'")
+    for ch in _DOUBLE_QUOTES:
+        s = s.replace(ch, '"')
+    s = s.replace("\u00a0", " ")  # NBSP
+    s = s.replace("\u202f", " ")  # NNBSP
+    s = s.replace("\u2009", " ")  # thin space
+    # Collapse whitespace and trim.
+    s = _WS_RE.sub(" ", s).strip()
+    return s
+
+
 def load_examples(path: str | Path, include_learned: bool = False) -> list[dict[str, str]]:
     """Load example pairs from JSON. Each item: {"diplomatic": "...", "full": "..."}. Cached by mtime.
     If path does not exist and include_learned=True, returns only learned pairs (from learned_examples.json)."""
@@ -131,15 +174,15 @@ def add_learned_pairs(
     """
     p = Path(learned_path)
     raw = load_learned(p)
-    # existing: diplomatic -> (full, pro)
-    existing: dict[str, tuple[str, bool]] = {}
+    # existing: appearance_key(diplomatic) -> (original_d, full, pro)
+    existing: dict[str, tuple[str, str, bool]] = {}
     for e in raw:
         d = (e.get("diplomatic") or "").strip()
         f = (e.get("full") or "").strip()
         if d:
-            existing[d] = (f, bool(e.get("pro")))
+            existing[appearance_key(d)] = (d, f, bool(e.get("pro")))
 
-    local = local_diplomatic or set()
+    local = {appearance_key(x) for x in (local_diplomatic or set()) if str(x).strip()}
     is_pro = _is_pro_model(model)
     added = 0
     for pair in pairs:
@@ -147,25 +190,26 @@ def add_learned_pairs(
         f = (pair.get("full") or "").strip()
         if not d or d == f:
             continue
+        dk = appearance_key(d)
         # Huge weight on local pairs: never overwrite main examples with Gemini guesses
-        if d in local:
+        if dk in local:
             continue
-        if d not in existing:
+        if dk not in existing:
             added += 1
-            existing[d] = (f, is_pro)
+            existing[dk] = (d, f, is_pro)
         else:
-            _, old_pro = existing[d]
+            _, _, old_pro = existing[dk]
             if is_pro and not old_pro:
-                existing[d] = (f, True)
+                existing[dk] = (d, f, True)
                 added += 1
             elif not is_pro and old_pro:
                 continue
             else:
-                existing[d] = (f, is_pro)
+                existing[dk] = (d, f, is_pro)
 
     items = [
-        {"diplomatic": k, "full": v, **({"pro": True} if pro else {})}
-        for k, (v, pro) in existing.items()
+        {"diplomatic": d, "full": f, **({"pro": True} if pro else {})}
+        for _, (d, f, pro) in existing.items()
     ]
     if len(items) > max_learned:
         pro_items = [x for x in items if x.get("pro")]
