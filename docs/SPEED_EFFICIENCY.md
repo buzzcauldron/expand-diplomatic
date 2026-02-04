@@ -8,7 +8,9 @@
 - **Streaming throttle**: In parallel mode with many blocks (>8), `partial_result_callback` runs every 2nd block to reduce XML serialization cost.
 - **Examples I/O**: Shared `_parse_pairs` helper; lean JSON load/save.
 - **Local rules pre-sort**: Sorted pairs computed once per document when backend=local; passed to each block (avoids O(n log n) sort per block).
-- **Block-ranges cache**: GUI caches `get_block_ranges` per panel content to avoid re-parsing on repeated clicks/syncs.
+- **Block-ranges cache**: GUI caches `get_block_ranges` per panel content to avoid re-parsing on repeated clicks/syncs. For content >64K chars, cache key is `(len, hash)` to avoid storing huge strings.
+- **Local rules single-pass**: `run_local_rules` uses one compiled regex and one `re.sub` pass over the text (with a replacement callback) instead of N separate replace/re.sub calls per pair.
+- **Example selection**: `select_examples_for_prompt` uses `heapq.nlargest` for longest-first strategy so selection is O(n log k) instead of O(n log n) when `max_examples` is small.
 - **Shared helpers**: `_local_name` (expander), `_format_examples_for_prompt` (expander), `_get_block_at_click` (GUI) — reduce duplication.
 
 ## Bottlenecks (expected)
@@ -49,13 +51,13 @@ Override: `EXPANDER_AGGRESSIVE_LOCAL=0` to disable; `=1` to force on (even on ba
 **Already efficient**
 
 - Examples: mtime cache (cap 8 paths); cache cleared on save so next load is fresh.
-- Block ranges: GUI cache keyed by content string, cap 4; avoids repeated lxml parse on click/sync.
+- Block ranges: GUI cache keyed by content (or len+hash for large content), cap 4; avoids repeated lxml parse on click/sync.
 - Expansion: prompt prefix and `sorted_pairs` built once per document; client/uploaded_file reused for block-by-block when Files API is used; parallel block expansion with throttled partial callbacks.
 - Gemini: model list cached 24h; fallback list for instant startup; 429/timeout retries.
 
 **Optional improvement**
 
-- Clear GUI block-ranges cache when loading a new file so we don’t retain multiple large XML strings (cache is cleared on new Open/load).
+- Clear GUI block-ranges cache when loading a new file so we don’t retain multiple large XML strings (cache is cleared on new Open/load). For content >64K chars the cache key is len+hash so the full string is not stored.
 
 ---
 
