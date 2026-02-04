@@ -56,6 +56,8 @@ def _run_one(
     max_concurrent: int | None = None,
     passes: int = 1,
     whole_document: bool = False,
+    max_examples: int | None = None,
+    example_strategy: str = "longest-first",
 ) -> None:
     from .expander import expand_xml
 
@@ -73,6 +75,8 @@ def _run_one(
         max_concurrent=max_concurrent,
         passes=passes,
         whole_document=whole_document,
+        max_examples=max_examples,
+        example_strategy=example_strategy,
     )
     if out_path is not None:
         out_path.write_text(result, encoding="utf-8")
@@ -186,6 +190,9 @@ def _run_expand(args: argparse.Namespace) -> None:
 
     ex_path = Path(args.examples) if whole_document and backend == "gemini" else None
 
+    max_examples = getattr(args, "max_examples", None)
+    example_strategy = getattr(args, "example_strategy", "longest-first") or "longest-first"
+
     def run(text: str, out: Path | None, *, fpath: Path | None = None, files_api: bool = False) -> None:
         _run_one(
             text,
@@ -202,6 +209,8 @@ def _run_expand(args: argparse.Namespace) -> None:
             max_concurrent=mc,
             passes=passes,
             whole_document=whole_document,
+            max_examples=max_examples,
+            example_strategy=example_strategy,
         )
 
     if args.text is not None:
@@ -296,6 +305,98 @@ def _run_test_gemini(args: argparse.Namespace) -> None:
     sys.exit(1)
 
 
+def _run_eval(args: argparse.Namespace) -> None:
+    """Run evaluation harness: rules-only, local (Ollama), Gemini; compare outputs and print report."""
+    from .expander import expand_xml
+    from .examples_io import load_examples
+
+    corpus_files = args.corpus
+    if not corpus_files:
+        default_corpus = _PROJECT_ROOT / "demo_latin.xml"
+        if not default_corpus.exists():
+            print(f"Error: no --corpus given and {default_corpus} not found.", file=sys.stderr)
+            sys.exit(1)
+        corpus_files = [default_corpus]
+    else:
+        for p in corpus_files:
+            if not p.exists():
+                print(f"Error: corpus file not found: {p}", file=sys.stderr)
+                sys.exit(1)
+
+    examples_path = getattr(args, "examples", _PROJECT_ROOT / "examples.json")
+    try:
+        examples = load_examples(examples_path)
+    except ValueError as e:
+        print(f"Error loading examples: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    out_dir = args.out_dir or (_PROJECT_ROOT / "dist" / "eval")
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Use first corpus file for eval (single-doc comparison)
+    xml_content = corpus_files[0].read_text(encoding="utf-8")
+    api_key = getattr(args, "api_key", None) or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+    model_gemini = _env("GEMINI_MODEL", _DEFAULT_GEMINI)
+    model_local = getattr(args, "local_model", "llama3.2")
+
+    results: dict[str, str] = {}
+    errors: dict[str, str] = {}
+
+    # Rules-only
+    try:
+        results["rules"] = expand_xml(xml_content, examples, backend="rules")
+        (out_dir / "rules.xml").write_text(results["rules"], encoding="utf-8")
+        print("rules: OK", file=sys.stderr)
+    except Exception as e:
+        errors["rules"] = str(e)
+        print(f"rules: FAIL — {e}", file=sys.stderr)
+
+    # Local (Ollama)
+    try:
+        results["local"] = expand_xml(
+            xml_content, examples, backend="local", model=model_local,
+        )
+        (out_dir / "local.xml").write_text(results["local"], encoding="utf-8")
+        print("local (Ollama): OK", file=sys.stderr)
+    except Exception as e:
+        errors["local"] = str(e)
+        print(f"local (Ollama): FAIL — {e}", file=sys.stderr)
+
+    # Gemini (optional)
+    if not getattr(args, "no_gemini", False) and api_key:
+        try:
+            results["gemini"] = expand_xml(
+                xml_content, examples, model=model_gemini, api_key=api_key, backend="gemini",
+            )
+            (out_dir / "gemini.xml").write_text(results["gemini"], encoding="utf-8")
+            print("gemini: OK", file=sys.stderr)
+        except Exception as e:
+            errors["gemini"] = str(e)
+            print(f"gemini: FAIL — {e}", file=sys.stderr)
+    else:
+        print("gemini: skipped (--no-gemini or no API key)", file=sys.stderr)
+
+    # Report
+    print("", file=sys.stderr)
+    print("--- Eval report ---", file=sys.stderr)
+    backends = [b for b in ("rules", "local", "gemini") if b in results]
+    if len(backends) < 2:
+        print("Need at least two backends to compare.", file=sys.stderr)
+        if errors:
+            for b, err in errors.items():
+                print(f"  {b}: {err}", file=sys.stderr)
+        return
+
+    for i, a in enumerate(backends):
+        for b in backends[i + 1:]:
+            sa, sb = results[a], results[b]
+            if sa.strip() == sb.strip():
+                print(f"  {a} vs {b}: identical", file=sys.stderr)
+            else:
+                print(f"  {a} vs {b}: differ", file=sys.stderr)
+    print(f"Artifacts written to {out_dir}", file=sys.stderr)
+
+
 def main() -> None:
     argv = sys.argv[1:]
     if argv and argv[0] == "train":
@@ -322,6 +423,50 @@ def main() -> None:
         ap.add_argument("--timeout", type=float, default=15, help="Timeout seconds (default 15)")
         args = ap.parse_args(argv[1:])
         _run_test_gemini(args)
+        return
+
+    if argv and argv[0] == "eval":
+        ap = argparse.ArgumentParser(
+            description="Evaluation harness: compare rules-only, local (Ollama), and Gemini outputs.",
+        )
+        ap.add_argument(
+            "--corpus",
+            type=Path,
+            nargs="*",
+            default=None,
+            help="Corpus XML file(s); default: demo_latin.xml in project root",
+        )
+        ap.add_argument(
+            "--examples",
+            type=Path,
+            default=_PROJECT_ROOT / "examples.json",
+            help="Examples JSON path (default: examples.json)",
+        )
+        ap.add_argument(
+            "--out-dir",
+            type=Path,
+            default=None,
+            help="Write artifacts here (default: dist/eval)",
+        )
+        ap.add_argument(
+            "--no-gemini",
+            action="store_true",
+            help="Skip Gemini run (e.g. no API key or offline)",
+        )
+        ap.add_argument(
+            "--api-key",
+            type=str,
+            default=None,
+            help="Gemini API key (overrides env)",
+        )
+        ap.add_argument(
+            "--local-model",
+            type=str,
+            default="llama3.2",
+            help="Ollama model for local run (default: llama3.2)",
+        )
+        args = ap.parse_args(argv[1:])
+        _run_eval(args)
         return
 
     expand_argv = argv[1:] if argv and argv[0] == "expand" else argv
@@ -417,6 +562,20 @@ def main() -> None:
         "--whole-doc",
         action="store_true",
         help="Expand entire document in one API call (instead of block-by-block)",
+    )
+    ap.add_argument(
+        "--max-examples",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Cap on examples injected per call (default: use all)",
+    )
+    ap.add_argument(
+        "--example-strategy",
+        type=str,
+        choices=("longest-first", "most-recent"),
+        default="longest-first",
+        help="Which examples to use when capped (default: longest-first)",
     )
     ap.add_argument("--version", "-V", action="version", version=__import__("expand_diplomatic._version", fromlist=["__version__"]).__version__)
     args = ap.parse_args(expand_argv)

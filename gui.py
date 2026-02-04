@@ -70,11 +70,27 @@ def _save_preferences(prefs: dict) -> None:
 
 # Lightweight imports at startup (no run_gemini, lxml); expand_xml lazy-loaded on first Expand
 # ideasrule-style: defer heavy work; use fallback for fast startup
-from expand_diplomatic.examples_io import add_learned_pairs, appearance_key, get_learned_path, load_examples, save_examples
+from expand_diplomatic.examples_io import add_learned_pairs, appearance_key, clear_examples_cache, get_learned_path, load_examples, save_examples
 from expand_diplomatic.gemini_models import DEFAULT_MODEL, FALLBACK_MODELS, format_model_with_speed
 
 DEFAULT_EXAMPLES = ROOT_DIR / "examples.json"
 BACKENDS = ("gemini", "local")
+# Display labels for backend dropdown (internal value unchanged for compatibility)
+BACKEND_LABELS = ("Gemini (cloud)", "Local (rules + Ollama)")
+_BACKEND_BY_LABEL = {"Gemini (cloud)": "gemini", "Local (rules + Ollama)": "local"}
+_BACKEND_LABEL_BY_VALUE = {"gemini": "Gemini (cloud)", "local": "Local (rules + Ollama)"}
+
+
+def _get_backend_value(display: str) -> str:
+    """Return internal backend value from dropdown display label."""
+    return _BACKEND_BY_LABEL.get((display or "").strip(), "gemini")
+
+
+def _get_backend_label(value: str) -> str:
+    """Return display label for internal backend value."""
+    return _BACKEND_LABEL_BY_VALUE.get((value or "").strip() or "gemini", BACKEND_LABELS[0])
+
+
 MODALITIES = ("full", "conservative", "normalize", "aggressive", "local")
 
 # Use fallback models for instant startup; refresh from API in background
@@ -153,31 +169,30 @@ def _schedule_auto_learn(
     *,
     model: str | None = None,
 ) -> None:
-    """Run auto-learn in a background thread when Learn is ticked and Gemini was used.
-    Aggressive training (GPU): higher cap. Huge weight on local pairs: main examples
-    (examples.json) are never overwritten by Gemini guesses."""
-    high_end = getattr(app, "_high_end_gpu", False)
-
+    """Stage extracted pairs into the review queue when Learn is ticked and Gemini was used.
+    Pairs from main examples.json are not staged (huge weight: never overwrite with Gemini guesses)."""
     def learn() -> None:
         try:
-            from expand_diplomatic.examples_io import DEFAULT_MAX_LEARNED
+            from expand_diplomatic.examples_io import appearance_key
 
-            from expand_diplomatic.expander import extract_expansion_pairs
+            from expand_diplomatic.expander import extract_expansion_pairs, pairs_to_word_level
+            from expand_diplomatic.learning import add_to_review_queue
 
-            pairs = extract_expansion_pairs(xml_input, xml_output)
+            block_pairs = extract_expansion_pairs(xml_input, xml_output)
+            pairs = pairs_to_word_level(block_pairs)
             if not pairs:
                 return
-            # Local pairs (main examples) have huge weight: never overwrite with Gemini guesses
-            main_examples = load_examples(examples_path)
-            local_diplomatic = {e.get("diplomatic", "").strip() for e in main_examples if e.get("diplomatic")}
-            learned_path = get_learned_path(examples_path)
-            add_learned_pairs(
-                pairs,
-                learned_path,
-                max_learned=4000 if high_end else DEFAULT_MAX_LEARNED,
-                model=model,
-                local_diplomatic=local_diplomatic,
-            )
+            main_examples = load_examples(examples_path, include_learned=False, include_personal_learned=False)
+            local_keys = {appearance_key((e.get("diplomatic") or "").strip()) for e in main_examples if e.get("diplomatic")}
+            pairs = [p for p in pairs if appearance_key((p.get("diplomatic") or "").strip()) not in local_keys]
+            if not pairs:
+                return
+            path = getattr(app, "last_input_path", None)
+            added = add_to_review_queue(pairs, source=model or "gemini", path=path)
+            if added and getattr(app, "_refresh_review_list", None) is not None:
+                app.root.after(0, app._refresh_review_list)
+            if added:
+                app.root.after(0, lambda: _status(app, f"{added} pair(s) staged for review."))
         except Exception:
             pass  # Quiet: do not disturb user
 
@@ -197,6 +212,8 @@ def _expand_worker(
     passes: int = 1,
     run_id: int = 0,
     cancel_event: "threading.Event | None" = None,
+    max_examples: int | None = None,
+    example_strategy: str = "longest-first",
 ) -> None:
     from expand_diplomatic.expander import ExpandCancelled, expand_xml
 
@@ -303,6 +320,8 @@ def _expand_worker(
             cancel_check=cancel_check,
             whole_document=whole_doc,
             examples_path=ex_path,
+            max_examples=max_examples,
+            example_strategy=example_strategy,
         )
     except Exception as e:
         err = e
@@ -559,8 +578,8 @@ def _show_api_error_dialog(
         "Expand failed:\n\n%s\n\nRetry with same setup? (Examples will be reloaded from disk.)" % message,
     ):
         app.backend = app.last_expand_backend
-        app.backend_var.set(app.last_expand_backend)
-        app._on_backend_change(app.last_expand_backend)
+        app.backend_var.set(_get_backend_label(app.last_expand_backend))
+        app._on_backend_change(app.backend_var.get())
         _focus_main(app)
         _run_expand_internal(
             app, xml,
@@ -573,8 +592,8 @@ def _show_api_error_dialog(
     def run_with_key(key: str, _save: bool) -> None:
         app.session_api_key = key
         app.backend = "gemini"
-        app.backend_var.set("gemini")
-        app._on_backend_change("gemini")
+        app.backend_var.set(_get_backend_label("gemini"))
+        app._on_backend_change(app.backend_var.get())
         _run_expand_internal(app, xml, key, "gemini", retry=True)
 
     win = tk.Toplevel(app.root)
@@ -599,16 +618,16 @@ def _show_api_error_dialog(
         _close_error_dialog(win, app, focus_main=False)
         _focus_main(app)
         app.backend = "local"
-        app.backend_var.set("local")
-        app._on_backend_change("local")
+        app.backend_var.set(_get_backend_label("local"))
+        app._on_backend_change(app.backend_var.get())
         _run_expand_internal(app, xml, None, "local", retry=True)
 
     def use_online() -> None:
         _close_error_dialog(win, app, focus_main=False)
         _focus_main(app)
         app.backend = "gemini"
-        app.backend_var.set("gemini")
-        app._on_backend_change("gemini")
+        app.backend_var.set(_get_backend_label("gemini"))
+        app._on_backend_change(app.backend_var.get())
         key = _resolve_api_key(app)
         if key:
             _run_expand_internal(app, xml, key, "gemini", retry=True)
@@ -711,9 +730,23 @@ def _run_expand_internal(
     run_id = app.expand_run_id
     app._expand_examples_path = examples_path if not include_learned else None
     app._expand_include_learned = include_learned
+    max_examples: int | None = None
+    try:
+        mev = (getattr(app, "max_examples_var", None) or tk.StringVar()).get()
+        if mev and str(mev).strip().isdigit():
+            n = int(mev.strip())
+            if n > 0:
+                max_examples = n
+    except (ValueError, TypeError):
+        pass
+    example_strategy = "longest-first"
+    if getattr(app, "example_strategy_var", None):
+        es = app.example_strategy_var.get().strip()
+        if es in ("longest-first", "most-recent"):
+            example_strategy = es
     t = threading.Thread(
         target=_expand_worker,
-        args=(xml, examples, api_key, app, backend, model, modality, max_concurrent, passes, run_id, cancel_event),
+        args=(xml, examples, api_key, app, backend, model, modality, max_concurrent, passes, run_id, cancel_event, max_examples, example_strategy),
         daemon=True,
     )
     t.start()
@@ -741,8 +774,11 @@ class App:
             self.root.wm_iconname(_APP_NAME)  # Icon/taskbar name on hover
         except Exception:
             pass
-        self.root.minsize(600, 400)
-        self.root.geometry("900x550")
+        # Default size chosen so the bottom status bar is visible on launch even with
+        # the multi-row top toolbar (users can still shrink after launch).
+        self.root.minsize(700, 520)
+        self.root.geometry("950x680")
+        self.root.resizable(True, True)
         _icon_path = ROOT_DIR / "stretch_armstrong_icon.png"
         if _icon_path.exists():
             try:
@@ -773,7 +809,7 @@ class App:
         self.last_output_path: Path | None = None  # file currently shown in output panel (for companion sync)
         self.folder_files: list[Path] = []  # XML files in current folder for Prev/Next
         self.folder_index: int = -1
-        self.backend_var = tk.StringVar(value="gemini")
+        self.backend_var = tk.StringVar(value=_get_backend_label("gemini"))
         self.modality_var = tk.StringVar(value="full")
         self.gemini_model_var = tk.StringVar(value=self.model_gemini)
         self.time_label_var = tk.StringVar(value="")
@@ -817,9 +853,11 @@ class App:
         self._build_toolbar()
         self._build_main()
         self._build_batch_panel()
+        self._build_review_panel()
         self._build_train()
         self._build_status()
         self._apply_preferences(_load_preferences())
+        self._refresh_review_list()
         self.root.protocol("WM_DELETE_WINDOW", self._on_quit)
         # Defer Gemini model fetch to background (ideasrule-style fast startup)
         self.root.after(200, self._refresh_models_background)
@@ -883,10 +921,19 @@ class App:
         col = 0
         tk.Label(settings1, text="Backend", **opts).grid(row=0, column=col, **pad)
         col += 1
-        self._backend_menu = tk.OptionMenu(settings1, self.backend_var, *BACKENDS, command=self._on_backend_change)
+        self._backend_menu = tk.OptionMenu(settings1, self.backend_var, *BACKEND_LABELS, command=self._on_backend_change)
         _style_option_menu(self._backend_menu)
         self._backend_menu.grid(row=0, column=col, sticky=tk.W, **pad)
+        _add_tooltip(
+            self._backend_menu,
+            "Gemini: Google's API (cloud). Local: rules (replace from examples) + optional Ollama (local GPU). "
+            "Examples are sent in the prompt only; Ollama is not fine-tuned—training would require a separate "
+            "pipeline (e.g. export data, run LoRA/fine-tune)."
+        )
         col += 1
+        self._backend_hint_var = tk.StringVar(value="Google's API (cloud).")
+        self._backend_hint_label = tk.Label(settings1, textvariable=self._backend_hint_var, font=("", 8), fg="gray")
+        self._backend_hint_label.grid(row=1, column=1, columnspan=min(col, 20), sticky=tk.W, padx=(2, 0), pady=(0, 2))
         self._model_label = tk.Label(settings1, text="Model", **opts)
         self._model_label.grid(row=0, column=col, **pad)
         col += 1
@@ -921,6 +968,22 @@ class App:
         col += 1
         self.passes_var = tk.StringVar(value="1")
         tk.Spinbox(settings1, from_=1, to=5, width=2, textvariable=self.passes_var).grid(row=0, column=col, sticky=tk.W, **pad)
+        col += 1
+        tk.Label(settings1, text="Max ex", **opts).grid(row=0, column=col, **pad)
+        col += 1
+        self.max_examples_var = tk.StringVar(value="")
+        self._max_examples_spinbox = tk.Spinbox(settings1, from_=0, to=500, width=4, textvariable=self.max_examples_var)
+        self._max_examples_spinbox.grid(row=0, column=col, sticky=tk.W, **pad)
+        _add_tooltip(self._max_examples_spinbox, "Cap on examples injected per call (0 or empty = use all).")
+        col += 1
+        EXAMPLE_STRATEGIES = ("longest-first", "most-recent")
+        tk.Label(settings1, text="Strategy", **opts).grid(row=0, column=col, **pad)
+        col += 1
+        self.example_strategy_var = tk.StringVar(value="longest-first")
+        self._strategy_menu = tk.OptionMenu(settings1, self.example_strategy_var, *EXAMPLE_STRATEGIES)
+        _style_option_menu(self._strategy_menu)
+        self._strategy_menu.grid(row=0, column=col, sticky=tk.W, **pad)
+        _add_tooltip(self._strategy_menu, "Which examples to use when capped: longest-first or most-recent.")
 
         settings2 = tk.Frame(toolbar_wrapper, relief=tk.FLAT, bd=0)
         settings2.pack(side=tk.TOP, fill=tk.X)
@@ -934,8 +997,16 @@ class App:
         _add_tooltip(rb_whole, "Expand entire document in one API call")
         _add_tooltip(rb_block, "Expand each block separately; shows per-block progress (default). Switch during run to cancel and restart.")
         self.whole_document_var.trace_add("write", self._on_whole_doc_change)
-        tk.Checkbutton(settings2, text="Learn", variable=self.auto_learn_var, **opts).pack(side=tk.LEFT, **pad)
-        tk.Checkbutton(settings2, text="Layered Training", variable=self.include_learned_var, **opts).pack(side=tk.LEFT, **pad)
+        _learn_ck = tk.Checkbutton(settings2, text="Learn", variable=self.auto_learn_var, **opts)
+        _learn_ck.pack(side=tk.LEFT, **pad)
+        _add_tooltip(
+            _learn_ck,
+            "When using Gemini: save new diplomatic→full pairs to learned_examples.json (used as in-prompt "
+            "examples only). Does not fine-tune Ollama—that would require a separate training pipeline."
+        )
+        _layered_ck = tk.Checkbutton(settings2, text="Layered Training", variable=self.include_learned_var, **opts)
+        _layered_ck.pack(side=tk.LEFT, **pad)
+        _add_tooltip(_layered_ck, "Include learned_examples.json in the prompt (Gemini and local rules/Ollama).")
         tk.Checkbutton(settings2, text="Autosave", variable=self.autosave_var, **opts).pack(side=tk.LEFT, **pad)
         tk.Label(settings2, text="Examples", **opts).pack(side=tk.LEFT, **pad)
         self._examples_entry = tk.Entry(settings2, textvariable=self.examples_var)
@@ -993,8 +1064,14 @@ class App:
         self._toolbar_canvas.configure(height=min(h, 120))
 
     def _on_backend_change(self, backend: str) -> None:
-        """Show or hide Gemini model dropdown; when local+GPU, suggest higher Parallel."""
-        is_local = backend.strip().lower() == "local"
+        """Show or hide Gemini model dropdown; when local+GPU, suggest higher Parallel. Update hint."""
+        backend_value = _get_backend_value(backend)
+        if getattr(self, "_backend_hint_var", None) is not None:
+            self._backend_hint_var.set(
+                "Rules + optional Ollama (local GPU). Examples in prompt only."
+                if backend_value == "local" else "Google's API (cloud)."
+            )
+        is_local = backend_value == "local"
         if is_local:
             self._model_label.grid_remove()
             self._model_menu.grid_remove()
@@ -1098,6 +1175,232 @@ class App:
         self._batch_listbox.tag_configure("failed", foreground="#cc0000", background="#ffe6e6")
         # Start collapsed
         self._batch_list_expanded = False
+
+    def _build_review_panel(self) -> None:
+        """Build collapsible Review learned panel (staged pairs from Gemini)."""
+        font9 = ("", 9)
+        btn_opts = {"font": font9, "takefocus": True, "padx": 6, "pady": 2}
+        self._review_frame = tk.LabelFrame(self.root, text="Review learned", font=font9)
+        header = tk.Frame(self._review_frame, relief=tk.FLAT)
+        header.pack(fill=tk.X, padx=2, pady=2)
+        self._review_toggle_btn = tk.Button(header, text="▶", width=2, command=self._toggle_review_list, **btn_opts)
+        self._review_toggle_btn.pack(side=tk.LEFT, padx=2)
+        self._review_summary_var = tk.StringVar(value="(0 staged)")
+        tk.Label(header, textvariable=self._review_summary_var, font=font9, anchor=tk.W).pack(side=tk.LEFT, padx=4)
+        self._review_queue_items: list[dict] = []
+        self._review_list_frame = tk.Frame(self._review_frame, relief=tk.FLAT)
+        self._review_search_var = tk.StringVar()
+        self._review_search_var.trace_add("write", self._schedule_review_refresh)
+        search_row = tk.Frame(self._review_list_frame)
+        search_row.pack(fill=tk.X)
+        tk.Label(search_row, text="Search", font=font9).pack(side=tk.LEFT, padx=(0, 4))
+        tk.Entry(search_row, textvariable=self._review_search_var, width=32, font=font9).pack(side=tk.LEFT, padx=2)
+        self._review_listbox = scrolledtext.ScrolledText(
+            self._review_list_frame, height=5, wrap=tk.WORD, state=tk.DISABLED,
+            font=font9, bg="#fafafa", relief=tk.FLAT,
+        )
+        self._review_listbox.pack(fill=tk.BOTH, expand=True, padx=0, pady=2)
+        self._review_listbox.bind("<Button-1>", self._on_review_list_click)
+        btns = tk.Frame(self._review_list_frame)
+        btns.pack(fill=tk.X, pady=2)
+        tk.Button(btns, text="Accept", width=7, command=self._review_accept, **btn_opts).pack(side=tk.LEFT, padx=2)
+        tk.Button(btns, text="Reject", width=6, command=self._review_reject, **btn_opts).pack(side=tk.LEFT, padx=2)
+        tk.Button(btns, text="Edit", width=4, command=self._review_edit, **btn_opts).pack(side=tk.LEFT, padx=2)
+        tk.Button(btns, text="Promote", width=7, command=self._review_promote, **btn_opts).pack(side=tk.LEFT, padx=2)
+        tk.Button(btns, text="Accept all", width=9, command=self._review_accept_all, **btn_opts).pack(side=tk.LEFT, padx=2)
+        tk.Button(btns, text="Reject all", width=9, command=self._review_reject_all, **btn_opts).pack(side=tk.LEFT, padx=2)
+        tk.Button(btns, text="Export…", width=6, command=self._review_export, **btn_opts).pack(side=tk.LEFT, padx=2)
+        self._review_list_expanded = False
+        self._review_refresh_after_id: str | None = None
+
+    def _schedule_review_refresh(self, *args: object) -> None:
+        if self._review_refresh_after_id is not None:
+            self.root.after_cancel(self._review_refresh_after_id)
+        self._review_refresh_after_id = self.root.after(200, self._do_review_refresh)
+
+    def _do_review_refresh(self) -> None:
+        self._review_refresh_after_id = None
+        self._refresh_review_list()
+
+    def _toggle_review_list(self) -> None:
+        if self._review_list_expanded:
+            self._review_list_frame.pack_forget()
+            self._review_toggle_btn.config(text="▶")
+            self._review_list_expanded = False
+        else:
+            self._review_list_frame.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
+            self._review_toggle_btn.config(text="▼")
+            self._review_list_expanded = True
+
+    def _refresh_review_list(self) -> None:
+        from expand_diplomatic.learning import load_review_queue
+
+        search = (self._review_search_var.get() or "").strip().lower()
+        raw = load_review_queue()
+        if search:
+            self._review_queue_items = [
+                e for e in raw
+                if search in (e.get("diplomatic") or "").lower() or search in (e.get("full") or "").lower()
+            ]
+        else:
+            self._review_queue_items = raw
+        self._review_summary_var.set(f"({len(self._review_queue_items)} staged)")
+        self._review_listbox.config(state=tk.NORMAL)
+        self._review_listbox.delete("1.0", tk.END)
+        for i, e in enumerate(self._review_queue_items):
+            d = (e.get("diplomatic") or "").strip()
+            f = (e.get("full") or "").strip()
+            self._review_listbox.insert(tk.END, f"  {d} → {f}\n")
+        self._review_listbox.config(state=tk.DISABLED)
+        self._review_selected_index: int | None = None
+
+    def _on_review_list_click(self, event: tk.Event) -> None:
+        if not self._review_queue_items:
+            return
+        line = self._review_listbox.index(f"@{event.x},{event.y}")
+        try:
+            line_num = int(line.split(".")[0])
+            if 1 <= line_num <= len(self._review_queue_items):
+                self._review_selected_index = line_num - 1
+        except (ValueError, IndexError):
+            pass
+
+    def _review_accept(self) -> None:
+        self._review_apply_to_selected(promote_to_project=False)
+
+    def _review_promote(self) -> None:
+        self._review_apply_to_selected(promote_to_project=True)
+
+    def _review_apply_to_selected(self, promote_to_project: bool) -> None:
+        from expand_diplomatic.learning import load_personal_learned, save_personal_learned, load_review_queue, save_review_queue
+
+        idx = getattr(self, "_review_selected_index", None)
+        if idx is None or idx < 0 or idx >= len(self._review_queue_items):
+            messagebox.showinfo("Review", "Select a pair in the list first.", parent=self.root)
+            return
+        item = self._review_queue_items[idx]
+        diplomatic = (item.get("diplomatic") or "").strip()
+        full = (item.get("full") or "").strip()
+        if not diplomatic or not full:
+            return
+        if promote_to_project:
+            p = Path(self.examples_var.get().strip() or str(DEFAULT_EXAMPLES))
+            try:
+                examples = load_examples(p, include_learned=False, include_personal_learned=False)
+            except ValueError as e:
+                messagebox.showerror("Examples", str(e), parent=self.root)
+                return
+            examples.append({"diplomatic": diplomatic, "full": full})
+            try:
+                save_examples(p, examples)
+            except Exception as e:
+                messagebox.showerror("Save examples", str(e), parent=self.root)
+                return
+            clear_examples_cache()
+        else:
+            personal = load_personal_learned()
+            personal.append({"diplomatic": diplomatic, "full": full})
+            save_personal_learned(personal)
+        queue = load_review_queue()
+        queue = [e for e in queue if (e.get("diplomatic") or "").strip() != diplomatic or (e.get("full") or "").strip() != full]
+        save_review_queue(queue)
+        self._refresh_review_list()
+        self._refresh_train_list()
+        _status(self, "Accepted and added to " + ("project examples" if promote_to_project else "personal learned"))
+
+    def _review_reject(self) -> None:
+        from expand_diplomatic.learning import load_review_queue, save_review_queue
+
+        idx = getattr(self, "_review_selected_index", None)
+        if idx is None or idx < 0 or idx >= len(self._review_queue_items):
+            messagebox.showinfo("Review", "Select a pair in the list first.", parent=self.root)
+            return
+        item = self._review_queue_items[idx]
+        diplomatic = (item.get("diplomatic") or "").strip()
+        full = (item.get("full") or "").strip()
+        queue = load_review_queue()
+        queue = [e for e in queue if (e.get("diplomatic") or "").strip() != diplomatic or (e.get("full") or "").strip() != full]
+        save_review_queue(queue)
+        self._refresh_review_list()
+        _status(self, "Rejected")
+
+    def _review_edit(self) -> None:
+        idx = getattr(self, "_review_selected_index", None)
+        if idx is None or idx < 0 or idx >= len(self._review_queue_items):
+            messagebox.showinfo("Review", "Select a pair in the list first.", parent=self.root)
+            return
+        item = self._review_queue_items[idx]
+        d = (item.get("diplomatic") or "").strip()
+        f = (item.get("full") or "").strip()
+        win = tk.Toplevel(self.root)
+        win.title("Edit pair")
+        win.transient(self.root)
+        frm = tk.Frame(win, padx=12, pady=12)
+        frm.pack(fill=tk.BOTH, expand=True)
+        tk.Label(frm, text="Diplomatic", font=("", 9)).grid(row=0, column=0, sticky=tk.W, padx=2, pady=2)
+        dip_var = tk.StringVar(value=d)
+        tk.Entry(frm, textvariable=dip_var, width=40, font=("", 9)).grid(row=0, column=1, padx=2, pady=2)
+        tk.Label(frm, text="Full", font=("", 9)).grid(row=1, column=0, sticky=tk.W, padx=2, pady=2)
+        full_var = tk.StringVar(value=f)
+        tk.Entry(frm, textvariable=full_var, width=40, font=("", 9)).grid(row=1, column=1, padx=2, pady=2)
+
+        def save_edit() -> None:
+            from expand_diplomatic.learning import load_review_queue, save_review_queue
+            nd, nf = dip_var.get().strip(), full_var.get().strip()
+            if not nd or not nf:
+                return
+            queue = load_review_queue()
+            for e in queue:
+                if (e.get("diplomatic") or "").strip() == d:
+                    e["diplomatic"] = nd
+                    e["full"] = nf
+                    break
+            save_review_queue(queue)
+            win.destroy()
+            self._refresh_review_list()
+
+        tk.Button(frm, text="Save", command=save_edit, font=("", 9)).grid(row=2, column=1, padx=2, pady=8)
+
+    def _review_accept_all(self) -> None:
+        from expand_diplomatic.learning import load_personal_learned, save_personal_learned, load_review_queue, save_review_queue
+
+        if not self._review_queue_items:
+            return
+        personal = load_personal_learned()
+        for item in self._review_queue_items:
+            diplomatic = (item.get("diplomatic") or "").strip()
+            full = (item.get("full") or "").strip()
+            if diplomatic and full:
+                personal.append({"diplomatic": diplomatic, "full": full})
+        save_personal_learned(personal)
+        save_review_queue([])
+        self._refresh_review_list()
+        self._refresh_train_list()
+        _status(self, "All accepted to personal learned")
+
+    def _review_reject_all(self) -> None:
+        from expand_diplomatic.learning import save_review_queue
+        save_review_queue([])
+        self._refresh_review_list()
+        _status(self, "All rejected")
+
+    def _review_export(self) -> None:
+        path = filedialog.asksaveasfilename(
+            title="Export staged pairs",
+            defaultextension=".json",
+            filetypes=[("JSON", "*.json"), ("All", "*.*")],
+            initialdir=str(self._file_dialog_dir()),
+        )
+        if not path:
+            return
+        items = [{"diplomatic": (e.get("diplomatic") or "").strip(), "full": (e.get("full") or "").strip()} for e in self._review_queue_items]
+        try:
+            import json
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(items, f, indent=2, ensure_ascii=False)
+            _status(self, f"Exported {len(items)} pairs")
+        except Exception as e:
+            messagebox.showerror("Export", str(e), parent=self.root)
 
     def _toggle_batch_list(self) -> None:
         """Toggle visibility of the batch file list."""
@@ -1264,6 +1567,7 @@ class App:
     def _build_train(self) -> None:
         tr = tk.LabelFrame(self.root, text="Train", font=("", 9))
         tr.pack(side=tk.TOP, fill=tk.X, padx=4, pady=2)
+        self._review_frame.pack(side=tk.TOP, fill=tk.X, padx=4, pady=2, before=tr)
         self._train_frame = tr
         row = tk.Frame(tr)
         row.pack(fill=tk.X, padx=2, pady=2)
@@ -1294,7 +1598,7 @@ class App:
         self._train_search_var = tk.StringVar()
         self._train_refresh_after_id: str | None = None
         self._train_search_var.trace_add("write", self._schedule_train_refresh)
-        search_entry = tk.Entry(search_row, textvariable=self._train_search_var, width=14, font=("", 9))
+        search_entry = tk.Entry(search_row, textvariable=self._train_search_var, width=24, font=("", 9))
         search_entry.pack(side=tk.LEFT, padx=2, pady=2)
         tk.Button(search_row, text="✕", width=2, font=("", 9), command=lambda: self._train_search_var.set("")).pack(side=tk.LEFT, padx=2, pady=2)
         self.train_list = scrolledtext.ScrolledText(tr, height=3, wrap=tk.WORD, state=tk.DISABLED, font=self._font_sm)
@@ -1591,7 +1895,7 @@ class App:
             messagebox.showerror("Open failed", str(e))
 
     def _on_expand(self) -> None:
-        backend = (self.backend_var.get() or "gemini").strip() or "gemini"
+        backend = _get_backend_value(self.backend_var.get())
         if backend not in BACKENDS:
             backend = "gemini"
         self.backend = backend
@@ -1646,7 +1950,7 @@ class App:
                 parallel = max(1, min(8, parallel))
             except ValueError:
                 parallel = 2
-            backend = (self.backend_var.get() or "gemini").strip() or "gemini"
+            backend = _get_backend_value(self.backend_var.get())
             model = self.gemini_model_var.get() if backend == "gemini" else ""
             if backend == "gemini" and "pro" in (model or "").lower():
                 parallel = min(parallel, 2)
@@ -1663,7 +1967,7 @@ class App:
             return
         self.input_txt.delete("1.0", tk.END)
         self.input_txt.insert("1.0", xml)
-        backend = (self.backend_var.get() or "gemini").strip() or "gemini"
+        backend = _get_backend_value(self.backend_var.get())
         if backend not in BACKENDS:
             backend = "gemini"
         self.backend = backend
@@ -1757,7 +2061,7 @@ class App:
     def _on_batch(self) -> None:
         """Open folder dialog and batch-expand all XML files in parallel."""
         # Validate API key for Gemini backend before folder selection
-        backend = (self.backend_var.get() or "gemini").strip() or "gemini"
+        backend = _get_backend_value(self.backend_var.get())
         api_key = _resolve_api_key(self)
         if backend == "gemini" and not api_key:
             messagebox.showerror(
@@ -1819,7 +2123,7 @@ class App:
         """Run batch expansion in background with file status tracking."""
         from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
-        backend = (self.backend_var.get() or "gemini").strip() or "gemini"
+        backend = _get_backend_value(self.backend_var.get())
         api_key = _resolve_api_key(self)
         modality = self.modality_var.get().strip() or "full"
         model = self.gemini_model_var.get() if backend == "gemini" else "llama3.2"
@@ -1867,6 +2171,20 @@ class App:
                 try:
                     if getattr(self, "cancel_requested", False):
                         return (f, False, f"{f.name}: cancelled")
+                    max_ex = None
+                    try:
+                        mev = (getattr(self, "max_examples_var", None) or tk.StringVar()).get()
+                        if mev and str(mev).strip().isdigit():
+                            n = int(str(mev).strip())
+                            if n > 0:
+                                max_ex = n
+                    except (ValueError, TypeError):
+                        pass
+                    strat = "longest-first"
+                    if getattr(self, "example_strategy_var", None):
+                        es = self.example_strategy_var.get().strip()
+                        if es in ("longest-first", "most-recent"):
+                            strat = es
                     result = expand_xml(
                         xml, examples,
                         model=model,
@@ -1877,6 +2195,8 @@ class App:
                         examples_path=ex_path,
                         # Block-level concurrency (Gemini): allow only when paid key to avoid 429s.
                         max_concurrent=(1 if (backend == "gemini" and not self.gemini_paid_key_var.get()) else None),
+                        max_examples=max_ex,
+                        example_strategy=strat,
                     )
                     if getattr(self, "cancel_requested", False):
                         return (f, False, f"{f.name}: cancelled")
@@ -2253,47 +2573,49 @@ class App:
             messagebox.showwarning("Train", "Select text in Output (right panel), then click From output.")
 
     def _on_add_example(self) -> None:
-        d = self.dip_var.get().strip()
-        f = self.full_var.get().strip()
-        if not d or not f:
+        diplomatic_text = self.dip_var.get().strip()
+        full_text = self.full_var.get().strip()
+        if not diplomatic_text or not full_text:
             messagebox.showwarning("Train", "Enter both Diplomatic and Full.")
             return
-        p = Path(self.examples_var.get().strip() or str(DEFAULT_EXAMPLES))
+        examples_path = Path(self.examples_var.get().strip() or str(DEFAULT_EXAMPLES))
         try:
-            examples = load_examples(p)
+            examples = load_examples(examples_path)
         except ValueError as e:
             messagebox.showerror("Examples", str(e))
             return
-        dk = appearance_key(d)
-        updated = False
+        diplomatic_key = appearance_key(diplomatic_text)
+        was_updated = False
         for ex in examples:
-            ed = (ex.get("diplomatic") or "").strip()
-            if ed and appearance_key(ed) == dk:
-                ex["full"] = f
-                updated = True
+            existing_diplomatic = (ex.get("diplomatic") or "").strip()
+            if existing_diplomatic and appearance_key(existing_diplomatic) == diplomatic_key:
+                ex["full"] = full_text
+                was_updated = True
                 break
-        if not updated:
-            examples.append({"diplomatic": d, "full": f})
+        if not was_updated:
+            examples.append({"diplomatic": diplomatic_text, "full": full_text})
         try:
-            save_examples(p, examples)
+            save_examples(examples_path, examples)
         except Exception as e:
             messagebox.showerror("Save examples", str(e))
             return
         self.dip_var.set("")
         self.full_var.set("")
         self._refresh_train_list()
-        _status(self, f"{'Updated' if updated else 'Added'} 1 pair → {p.name} ({len(examples)} total)")
+        _status(self, f"{'Updated' if was_updated else 'Added'} 1 pair → {examples_path.name} ({len(examples)} total)")
 
     def _collect_preferences(self) -> dict:
         """Build preferences dict from current UI state."""
         p = {}
         try:
-            p["backend"] = self.backend_var.get().strip() or "gemini"
+            p["backend"] = _get_backend_value(self.backend_var.get())
             p["modality"] = self.modality_var.get().strip() or "full"
             p["gemini_model"] = self.gemini_model_var.get().strip() or ""
             p["concurrent"] = self.concurrent_var.get().strip() or "2"
             p["gemini_paid_key"] = bool(self.gemini_paid_key_var.get())
             p["passes"] = self.passes_var.get().strip() or "1"
+            p["max_examples"] = (getattr(self, "max_examples_var", None) or tk.StringVar()).get().strip()
+            p["example_strategy"] = (getattr(self, "example_strategy_var", None) or tk.StringVar(value="longest-first")).get().strip() or "longest-first"
             p["whole_document"] = bool(self.whole_document_var.get())
             p["auto_learn"] = bool(self.auto_learn_var.get())
             p["include_learned"] = bool(self.include_learned_var.get())
@@ -2311,8 +2633,8 @@ class App:
             return
         try:
             if p.get("backend") in BACKENDS:
-                self.backend_var.set(p["backend"])
-                self._on_backend_change(p["backend"])
+                self.backend_var.set(_get_backend_label(p["backend"]))
+                self._on_backend_change(self.backend_var.get())
             if p.get("modality") in MODALITIES:
                 self.modality_var.set(p["modality"])
             gemini_model = p.get("gemini_model", "").strip()
@@ -2326,6 +2648,12 @@ class App:
             passes = p.get("passes", "")
             if passes and passes.isdigit():
                 self.passes_var.set(passes)
+            me = p.get("max_examples", "").strip()
+            if me is not None:
+                self.max_examples_var.set(me)
+            es = p.get("example_strategy", "").strip()
+            if es in ("longest-first", "most-recent"):
+                self.example_strategy_var.set(es)
             if "whole_document" in p:
                 self.whole_document_var.set(bool(p["whole_document"]))
             if "auto_learn" in p:

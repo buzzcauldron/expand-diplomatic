@@ -50,6 +50,30 @@ def clear_examples_cache() -> None:
     _learned_cache.clear()
 
 
+def select_examples_for_prompt(
+    examples: list[dict[str, str]],
+    max_examples: int | None = None,
+    strategy: str = "longest-first",
+) -> list[dict[str, str]]:
+    """Select a subset of examples for injection into the prompt (Gemini/Ollama).
+    - max_examples: cap (None = use all).
+    - strategy: 'longest-first' (prefer longer diplomatic forms) or 'most-recent' (last N in list).
+    """
+    if not examples:
+        return []
+    if max_examples is None or max_examples >= len(examples):
+        return list(examples)
+    if strategy == "most-recent":
+        return list(examples[-max_examples:])
+    # longest-first: sort by len(diplomatic) descending, take first max_examples
+    sorted_list = sorted(
+        examples,
+        key=lambda e: len((e.get("diplomatic") or "").strip()),
+        reverse=True,
+    )
+    return sorted_list[:max_examples]
+
+
 def get_learned_path(examples_path: str | Path) -> Path:
     """Path for learned examples file (alongside examples.json)."""
     p = Path(examples_path)
@@ -95,45 +119,69 @@ def appearance_key(text: str) -> str:
     """
     if text is None:
         return ""
-    s = str(text)
+    normalized = str(text)
     # Compatibility fold (e.g. ligatures, fullwidth), then strip zero-width.
-    s = unicodedata.normalize("NFKC", s)
-    s = "".join(ch for ch in s if ch not in _ZERO_WIDTH)
+    normalized = unicodedata.normalize("NFKC", normalized)
+    normalized = "".join(ch for ch in normalized if ch not in _ZERO_WIDTH)
     # Fold common punctuation lookalikes.
     for ch in _DASHES:
-        s = s.replace(ch, "-")
+        normalized = normalized.replace(ch, "-")
     for ch in _SINGLE_QUOTES:
-        s = s.replace(ch, "'")
+        normalized = normalized.replace(ch, "'")
     for ch in _DOUBLE_QUOTES:
-        s = s.replace(ch, '"')
-    s = s.replace("\u00a0", " ")  # NBSP
-    s = s.replace("\u202f", " ")  # NNBSP
-    s = s.replace("\u2009", " ")  # thin space
+        normalized = normalized.replace(ch, '"')
+    normalized = normalized.replace("\u00a0", " ")  # NBSP
+    normalized = normalized.replace("\u202f", " ")  # NNBSP
+    normalized = normalized.replace("\u2009", " ")  # thin space
     # Collapse whitespace and trim.
-    s = _WS_RE.sub(" ", s).strip()
-    return s
+    normalized = _WS_RE.sub(" ", normalized).strip()
+    return normalized
 
 
-def load_examples(path: str | Path, include_learned: bool = False) -> list[dict[str, str]]:
-    """Load example pairs from JSON. Each item: {"diplomatic": "...", "full": "..."}. Cached by mtime.
-    If path does not exist and include_learned=True, returns only learned pairs (from learned_examples.json)."""
+def load_examples(
+    path: str | Path,
+    include_learned: bool = False,
+    include_personal_learned: bool = True,
+) -> list[dict[str, str]]:
+    """Load example pairs with deterministic layering: project examples, then project learned, then personal learned.
+    Each item: {"diplomatic": "...", "full": "..."}. First occurrence of an appearance_key wins (project overrides later).
+    If path does not exist and include_learned=True, returns only learned (and optionally personal) pairs."""
+    seen: set[str] = set()
+    out: list[dict[str, str]] = []
+
+    def add_layer(pairs: list[dict]) -> None:
+        for e in pairs:
+            d = (e.get("diplomatic") or "").strip()
+            if not d:
+                continue
+            key = appearance_key(d)
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append({"diplomatic": d, "full": str(e.get("full", "")).strip()})
+
     p = Path(path)
-    if not p.exists():
-        return [] if not include_learned else load_learned(get_learned_path(p))
-    # Check cache
-    cached = _get_cached(p, _examples_cache)
-    if cached is not None:
-        out = list(cached)  # Copy to avoid mutation
-    else:
-        try:
-            with open(p, encoding="utf-8") as f:
-                data = json.load(f)
-        except json.JSONDecodeError as e:
-            raise ValueError(f"Invalid JSON in {p}: {e}") from e
-        out = _parse_pairs(data if isinstance(data, list) else [])
-        _set_cache(p, out, _examples_cache)
+    if p.exists():
+        cached = _get_cached(p, _examples_cache)
+        if cached is not None:
+            add_layer(list(cached))
+        else:
+            try:
+                with open(p, encoding="utf-8") as f:
+                    data = json.load(f)
+            except json.JSONDecodeError as e:
+                raise ValueError(f"Invalid JSON in {p}: {e}") from e
+            project = _parse_pairs(data if isinstance(data, list) else [])
+            _set_cache(p, project, _examples_cache)
+            add_layer(project)
     if include_learned:
-        out = out + load_learned(get_learned_path(p))
+        add_layer(load_learned(get_learned_path(p)))
+    if include_personal_learned:
+        try:
+            from .learning import load_personal_learned
+            add_layer(load_personal_learned())
+        except Exception:
+            pass
     return out
 
 
@@ -177,35 +225,35 @@ def add_learned_pairs(
     # existing: appearance_key(diplomatic) -> (original_d, full, pro)
     existing: dict[str, tuple[str, str, bool]] = {}
     for e in raw:
-        d = (e.get("diplomatic") or "").strip()
-        f = (e.get("full") or "").strip()
-        if d:
-            existing[appearance_key(d)] = (d, f, bool(e.get("pro")))
+        existing_diplomatic = (e.get("diplomatic") or "").strip()
+        existing_full = (e.get("full") or "").strip()
+        if existing_diplomatic:
+            existing[appearance_key(existing_diplomatic)] = (existing_diplomatic, existing_full, bool(e.get("pro")))
 
     local = {appearance_key(x) for x in (local_diplomatic or set()) if str(x).strip()}
     is_pro = _is_pro_model(model)
     added = 0
     for pair in pairs:
-        d = (pair.get("diplomatic") or "").strip()
-        f = (pair.get("full") or "").strip()
-        if not d or d == f:
+        diplomatic_text = (pair.get("diplomatic") or "").strip()
+        full_text = (pair.get("full") or "").strip()
+        if not diplomatic_text or diplomatic_text == full_text:
             continue
-        dk = appearance_key(d)
+        diplomatic_key = appearance_key(diplomatic_text)
         # Huge weight on local pairs: never overwrite main examples with Gemini guesses
-        if dk in local:
+        if diplomatic_key in local:
             continue
-        if dk not in existing:
+        if diplomatic_key not in existing:
             added += 1
-            existing[dk] = (d, f, is_pro)
+            existing[diplomatic_key] = (diplomatic_text, full_text, is_pro)
         else:
-            _, _, old_pro = existing[dk]
+            _, _, old_pro = existing[diplomatic_key]
             if is_pro and not old_pro:
-                existing[dk] = (d, f, True)
+                existing[diplomatic_key] = (diplomatic_text, full_text, True)
                 added += 1
             elif not is_pro and old_pro:
                 continue
             else:
-                existing[dk] = (d, f, is_pro)
+                existing[diplomatic_key] = (diplomatic_text, full_text, is_pro)
 
     items = [
         {"diplomatic": d, "full": f, **({"pro": True} if pro else {})}

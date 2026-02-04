@@ -61,6 +61,8 @@ Deterministic, Latin-only, no translation. Add more pairs in **Train** or `examp
 
 **Caveat:** The LLM sometimes echoes prompt structure (e.g. `Diplomatic:` / `Full:`) into the output. Use **conservative** or **normalize** to reduce this; we’re improving prompts to strip or avoid leakage.
 
+**Why aren't learned pairs used to train/fine-tune Ollama?** The app only talks to Ollama via its inference API (send prompt, get response). Fine-tuning a model (e.g. LoRA, full fine-tune) requires exporting data, running a separate training pipeline, and loading new weights—Ollama's API does not support on-the-fly training. So examples (including `learned_examples.json`) are used **in the prompt** (in-context) only; the local model is not updated by the app.
+
 ---
 
 ## 3. Gemini (API)
