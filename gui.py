@@ -70,7 +70,7 @@ def _save_preferences(prefs: dict) -> None:
 
 # Lightweight imports at startup (no run_gemini, lxml); expand_xml lazy-loaded on first Expand
 # ideasrule-style: defer heavy work; use fallback for fast startup
-from expand_diplomatic.examples_io import add_learned_pairs, get_learned_path, load_examples, save_examples
+from expand_diplomatic.examples_io import add_learned_pairs, appearance_key, get_learned_path, load_examples, save_examples
 from expand_diplomatic.gemini_models import DEFAULT_MODEL, FALLBACK_MODELS, format_model_with_speed
 
 DEFAULT_EXAMPLES = ROOT_DIR / "examples.json"
@@ -2194,7 +2194,16 @@ class App:
         except ValueError as e:
             messagebox.showerror("Examples", str(e))
             return
-        examples.append({"diplomatic": d, "full": f})
+        dk = appearance_key(d)
+        updated = False
+        for ex in examples:
+            ed = (ex.get("diplomatic") or "").strip()
+            if ed and appearance_key(ed) == dk:
+                ex["full"] = f
+                updated = True
+                break
+        if not updated:
+            examples.append({"diplomatic": d, "full": f})
         try:
             save_examples(p, examples)
         except Exception as e:
@@ -2203,7 +2212,7 @@ class App:
         self.dip_var.set("")
         self.full_var.set("")
         self._refresh_train_list()
-        _status(self, f"Added 1 pair → {p.name} ({len(examples)} total)")
+        _status(self, f"{'Updated' if updated else 'Added'} 1 pair → {p.name} ({len(examples)} total)")
 
     def _collect_preferences(self) -> dict:
         """Build preferences dict from current UI state."""
