@@ -1268,7 +1268,7 @@ class App:
             self._review_toggle_btn.config(text="▼")
             self._review_list_expanded = True
 
-    def _refresh_review_list(self) -> None:
+    def _refresh_review_list(self, keep_index: int | None = None) -> None:
         from expand_diplomatic.learning import load_review_queue, queue_items_to_word_level
 
         if self._review_autosave_after_id is not None:
@@ -1294,8 +1294,13 @@ class App:
         )
         if text:
             self._review_listbox.insert(tk.END, text)
-        self._review_selected_index = None
-        self._update_review_selection_highlight()
+        if keep_index is not None and 0 <= keep_index < len(self._review_queue_items):
+            self._review_selected_index = keep_index
+            self._update_review_selection_highlight()
+            self._review_listbox.see(f"{keep_index + 1}.0")
+        else:
+            self._review_selected_index = None
+            self._update_review_selection_highlight()
 
     def _review_apply_edits_from_text(self) -> bool:
         """Parse list content (lines '  diplomatic → full') and save to review queue. Returns True if saved."""
@@ -1408,7 +1413,9 @@ class App:
         if idx is not None and 0 <= idx < len(self._review_queue_items):
             self._review_queue_items.pop(idx)
         save_review_queue(self._review_queue_items)
-        self._refresh_review_list()
+        # Keep list at same position: select the item that moved into this index (or last if at end)
+        next_index = min(idx, len(self._review_queue_items) - 1) if self._review_queue_items else None
+        self._refresh_review_list(keep_index=next_index)
         self._refresh_train_list()
         _status(self, "Accepted and added to " + ("project examples" if promote_to_project else "personal learned"))
 
@@ -1426,7 +1433,9 @@ class App:
         save_review_queue(self._review_queue_items)
         if diplomatic:
             record_individual_reject(appearance_key(diplomatic))
-        self._refresh_review_list()
+        # Keep list at same position: select the item that moved into this index (or last if at end)
+        next_index = min(idx, len(self._review_queue_items) - 1) if self._review_queue_items else None
+        self._refresh_review_list(keep_index=next_index)
         _status(self, "Rejected (won’t re-suggest for 3–4 documents)")
 
     def _review_edit(self) -> None:
