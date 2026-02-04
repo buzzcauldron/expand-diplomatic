@@ -5,9 +5,10 @@
 # then builds the MSI. Requires Python 3.10+ on Windows or WSL2.
 #
 # Usage:
-#   ./scripts/build-windows-msi.sh [--no-clean]
+#   ./scripts/build-windows-msi.sh [--no-clean] [--install-deps]
+#   --install-deps    Install build dependencies (pip) before building.
 #
-# On Windows (Command Prompt/PowerShell): run scripts\build-windows-msi.bat instead.
+# Supported: Windows 10, 11 (and Server equivalents). On Windows use scripts\build-windows-msi.bat.
 # Do not double-click this .sh file—Windows may open it in an editor. Use the .bat.
 #
 
@@ -17,6 +18,16 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 BUILD_DIR="$PROJECT_ROOT/build"
 DIST_DIR="$PROJECT_ROOT/dist"
+
+INSTALL_DEPS=0
+NO_CLEAN=0
+for arg in "$@"; do
+    case "$arg" in
+        --install-deps|-i) INSTALL_DEPS=1 ;;
+        --no-clean) NO_CLEAN=1 ;;
+        *) ;;
+    esac
+done
 
 echo "=== Building Windows MSI installer ==="
 cd "$PROJECT_ROOT"
@@ -50,9 +61,11 @@ fi
 echo "Dependencies OK."
 
 # Clean previous builds unless --no-clean
-if [[ "$1" != "--no-clean" ]]; then
+if [[ $NO_CLEAN -eq 0 ]]; then
     echo "Cleaning previous builds..."
-    rm -rf "$BUILD_DIR" "$DIST_DIR"/*.msi
+    rm -rf "$BUILD_DIR"
+    mkdir -p "$DIST_DIR"
+    rm -f "$DIST_DIR"/*.msi 2>/dev/null || true
 fi
 
 # Create .ico from .png if needed (Windows requires .ico for exe/installer)
@@ -81,9 +94,9 @@ import sys
 from pathlib import Path
 from cx_Freeze import setup, Executable
 
-# Read version
+# Read version (fallback should match expand_diplomatic/_version.py)
 version_file = Path(__file__).parent / "expand_diplomatic" / "_version.py"
-version = "0.3.0"
+version = "0.3.3"
 for line in version_file.read_text().splitlines():
     if line.startswith("__version__"):
         version = line.split("=")[1].strip().strip('"').strip("'")

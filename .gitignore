@@ -22,3 +22,6 @@ learned_examples.json
 dist/
 build/
 *.egg-info/
+
+# RPM build output
+rpmbuild/

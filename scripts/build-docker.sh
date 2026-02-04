@@ -2,6 +2,8 @@
 # Build Docker image for Mac, Linux, and Windows (via WSL2).
 # Platforms: linux/amd64 (x64), linux/arm64 (Mac Silicon, ARM). Optional: linux/arm/v7.
 #
+# Supported hosts: any OS with Docker (Linux, macOS 11+, Windows 10/11 with WSL2 or Docker Desktop).
+#
 # Usage: ./scripts/build-docker.sh [--push] [--load] [--platform PLAT[,PLAT...]] [--skip-ollama]
 #   --push            Push to registry after build.
 #   --load            Build for detected host and load (native arch; prefers hardware over emulator).

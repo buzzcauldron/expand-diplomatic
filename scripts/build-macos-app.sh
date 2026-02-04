@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # Build macOS .app bundle for Expand Diplomatic GUI
 # Requires: py2app or creates standalone .app with bundled Python
-# Usage: ./scripts/build-macos-app.sh
+# Usage: ./scripts/build-macos-app.sh [--install-deps]
+#   --install-deps    Install Python deps and optional py2app (pip)
 # Output: dist/Expand-Diplomatic.app
+#
+# Supported: macOS 11 (Big Sur) through current (Intel and Apple Silicon).
 
 set -euo pipefail
 
@@ -10,9 +13,32 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$PROJECT_ROOT"
 
+INSTALL_DEPS=0
+for arg in "$@"; do
+    case "$arg" in
+        --install-deps|-i) INSTALL_DEPS=1 ;;
+        *) echo "Unknown option: $arg. Usage: $0 [--install-deps]" >&2; exit 1 ;;
+    esac
+done
+
+if [[ $INSTALL_DEPS -eq 1 ]]; then
+    echo "Installing build dependencies (pip)..."
+    pip3 install -q -r "$PROJECT_ROOT/requirements.txt"
+    pip3 install -q build wheel 2>/dev/null || true
+    pip3 install -q py2app 2>/dev/null || true
+    echo "Build dependencies installed."
+    echo ""
+fi
+
 # Check if on macOS
 if [[ "$(uname -s)" != "Darwin" ]]; then
     echo "Error: This script must be run on macOS"
+    exit 1
+fi
+
+# Check for python3 (required for py2app or manual .app launcher)
+if ! command -v python3 &> /dev/null; then
+    echo "Error: python3 not found. Install Python 3.10+ (e.g. from python.org or Homebrew)."
     exit 1
 fi
 
@@ -32,8 +58,7 @@ from setuptools import setup
 
 APP = ['gui.py']
 DATA_FILES = [
-    ('', ['examples.json', '.env.example', 'README.md']),
-    ('', ['stretch_armstrong_icon.png']),
+    ('', ['examples.json', '.env.example', 'README.md', 'stretch_armstrong_icon.png']),
 ]
 OPTIONS = {
     'argv_emulation': False,
@@ -45,7 +70,7 @@ OPTIONS = {
         'CFBundleIdentifier': 'com.github.halxiii.expand-diplomatic',
         'CFBundleVersion': '${VERSION}',
         'CFBundleShortVersionString': '${VERSION}',
-        'NSHumanReadableCopyright': 'Copyright © 2024',
+        'NSHumanReadableCopyright': 'Copyright © 2024-2026',
     }
 }
 
