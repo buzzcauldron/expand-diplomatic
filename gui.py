@@ -196,11 +196,17 @@ def _expand_worker(
     max_concurrent: int,
     passes: int = 1,
     run_id: int = 0,
+    cancel_event: "threading.Event | None" = None,
 ) -> None:
     from expand_diplomatic.expander import ExpandCancelled, expand_xml
 
     def cancel_check() -> bool:
-        return getattr(app, "cancel_requested", False)
+        # Per-run cancel flag so old runs can finish in background without
+        # being "un-cancelled" by starting a new run.
+        try:
+            return bool(cancel_event and cancel_event.is_set())
+        except Exception:
+            return bool(getattr(app, "cancel_requested", False))
 
     # Hang detection: track time since last progress update
     last_progress_time = [time.time()]
@@ -212,6 +218,8 @@ def _expand_worker(
         pct = int(100 * current / total) if total > 0 else 0
 
         def update_ui() -> None:
+            if getattr(app, "expand_run_id", -1) != run_id:
+                return
             app.last_progress_time = time.time()
             app._base_status = s
             # Whole-doc uses indeterminate bar (animating); only set value for block-by-block
@@ -227,6 +235,8 @@ def _expand_worker(
     def partial_cb(xml_result: str) -> None:
         """Display each completed block. If user had a block highlighted (double-click), stay there."""
         def update_output() -> None:
+            if getattr(app, "expand_run_id", -1) != run_id:
+                return
             out = app.output_txt
             # If user has synced block, preserve scroll and re-apply highlight after update
             block_idx = getattr(app, "_synced_block_idx", None)
@@ -679,6 +689,10 @@ def _run_expand_internal(
     app.last_progress_time = time.time()
     app.expand_running = True
     app.cancel_requested = False
+    # Per-run cancellation; lets the user cancel and start a new run while
+    # the previous API call finishes in the background.
+    cancel_event = threading.Event()
+    app._current_cancel_event = cancel_event
     app.expand_run_id = getattr(app, "expand_run_id", 0) + 1
     whole_doc = app.whole_document_var.get() if getattr(app, "whole_document_var", None) else False
     app._expand_whole_doc = whole_doc  # Hang check uses longer threshold for whole-doc
@@ -699,7 +713,7 @@ def _run_expand_internal(
     app._expand_include_learned = include_learned
     t = threading.Thread(
         target=_expand_worker,
-        args=(xml, examples, api_key, app, backend, model, modality, max_concurrent, passes, run_id),
+        args=(xml, examples, api_key, app, backend, model, modality, max_concurrent, passes, run_id, cancel_event),
         daemon=True,
     )
     t.start()
@@ -769,6 +783,8 @@ class App:
         self.expand_start_time: float = 0.0
         self.last_progress_time: float = 0.0
         self.expand_running: bool = False
+        # Per-run cancel event for single-file expands (supports backgrounding old runs)
+        self._current_cancel_event: threading.Event | None = None
         self.hang_check_id: str | None = None
         self._high_end_gpu = False
         try:
@@ -828,97 +844,89 @@ class App:
                 om["menu"].configure(font=font9, tearoff=0)
             except Exception:
                 pass
-        # Essential row (fixed): Open, Batch, Expand, Re-expand, Save, prev/next — always visible
-        essential_row = tk.Frame(toolbar_wrapper, relief=tk.FLAT, bd=0)
-        essential_row.pack(side=tk.TOP, fill=tk.X)
+
+        def _sep(parent: tk.Widget) -> None:
+            tk.Frame(parent, width=10, height=1, relief=tk.FLAT).pack(side=tk.LEFT)
+
+        # Row 0: Primary actions (always visible)
+        actions_row = tk.Frame(toolbar_wrapper, relief=tk.FLAT, bd=0)
+        actions_row.pack(side=tk.TOP, fill=tk.X)
         for w in [
             (tk.Button, "Open", self._on_open, {"width": 6}),
-            (tk.Button, "Batch…", self._on_batch, {"width": 6}),
-            (tk.Button, "Expand", self._on_expand, {"width": 6}),
-            (tk.Button, "Re-expand", self._on_reexpand, {"width": 8}),
-            (tk.Button, "Save", self._on_save, {"width": 6}),
             (tk.Button, "◀", self._on_prev_file, {"width": 2}),
             (tk.Button, "▶", self._on_next_file, {"width": 2}),
+            (tk.Button, "Save", self._on_save, {"width": 6}),
         ]:
             cls, txt, cmd, kw = w
-            btn = cls(essential_row, text=txt, command=cmd, **{**btn_opts, **kw})
-            btn.pack(side=tk.LEFT, **pad)
-            if txt == "Expand":
-                self.expand_btn = btn
-        # Scrollable area: secondary actions + settings (moves with window, scrolls when narrow)
-        self._toolbar_canvas = tk.Canvas(toolbar_wrapper, highlightthickness=0, height=56)
-        self._toolbar_scrollbar = tk.Scrollbar(toolbar_wrapper, orient=tk.HORIZONTAL, command=self._toolbar_canvas.xview)
-        self._toolbar_canvas.configure(xscrollcommand=self._toolbar_scrollbar.set)
-        self._toolbar_canvas.pack(side=tk.TOP, fill=tk.X)
-        self._toolbar_scrollbar.pack(side=tk.BOTTOM, fill=tk.X)
-        bar = tk.Frame(self._toolbar_canvas, relief=tk.FLAT, bd=0)
-        self._toolbar_frame = bar
-        self._toolbar_canvas_window = self._toolbar_canvas.create_window(0, 0, window=bar, anchor=tk.NW)
-        self._toolbar_canvas.bind("<Configure>", self._on_toolbar_canvas_configure)
-        bar.bind("<Configure>", lambda e: self._schedule_toolbar_scroll())
-        self._toolbar_scroll_after_id: str | None = None
-        self.root.after(50, self._update_toolbar_scroll)
-        # Row 0: Secondary actions (export, Diff)
-        r1 = tk.Frame(bar)
-        r1.pack(side=tk.TOP, fill=tk.X)
-        for w in [
-            (tk.Button, "In→TXT", self._on_save_input_txt, {"width": 5}),
-            (tk.Button, "Out→TXT", self._on_save_output_txt, {"width": 6}),
-            (tk.Button, "Diff", self._on_diff, {"width": 4}),
-        ]:
-            cls, txt, cmd, kw = w
-            cls(r1, text=txt, command=cmd, **{**btn_opts, **kw}).pack(side=tk.LEFT, **pad)
-        # Row 1: Settings (grid so Examples entry expands)
-        r2 = tk.Frame(bar)
-        r2.pack(side=tk.TOP, fill=tk.X)
-        r2.columnconfigure(17, weight=1, minsize=80)  # Examples entry expands
+            cls(actions_row, text=txt, command=cmd, **{**btn_opts, **kw}).pack(side=tk.LEFT, **pad)
+
+        _sep(actions_row)
+        tk.Button(actions_row, text="Batch…", command=self._on_batch, width=6, **btn_opts).pack(side=tk.LEFT, **pad)
+        _sep(actions_row)
+        self.expand_btn = tk.Button(actions_row, text="Expand", command=self._on_expand, width=6, **btn_opts)
+        self.expand_btn.pack(side=tk.LEFT, **pad)
+        tk.Button(actions_row, text="Re-expand", command=self._on_reexpand, width=8, **btn_opts).pack(
+            side=tk.LEFT, **pad
+        )
+        _sep(actions_row)
+        tk.Button(actions_row, text="Input→TXT", command=self._on_save_input_txt, width=9, **btn_opts).pack(
+            side=tk.LEFT, **pad
+        )
+        tk.Button(actions_row, text="Output→TXT", command=self._on_save_output_txt, width=10, **btn_opts).pack(
+            side=tk.LEFT, **pad
+        )
+        tk.Button(actions_row, text="Diff", command=self._on_diff, width=4, **btn_opts).pack(side=tk.LEFT, **pad)
+
+        # Row 1: Core settings (always visible; split into 2 compact lines)
+        settings1 = tk.Frame(toolbar_wrapper, relief=tk.FLAT, bd=0)
+        settings1.pack(side=tk.TOP, fill=tk.X)
         col = 0
-        tk.Label(r2, text="Backend", **opts).grid(row=0, column=col, **pad)
+        tk.Label(settings1, text="Backend", **opts).grid(row=0, column=col, **pad)
         col += 1
-        self._backend_menu = tk.OptionMenu(r2, self.backend_var, *BACKENDS, command=self._on_backend_change)
+        self._backend_menu = tk.OptionMenu(settings1, self.backend_var, *BACKENDS, command=self._on_backend_change)
         _style_option_menu(self._backend_menu)
         self._backend_menu.grid(row=0, column=col, sticky=tk.W, **pad)
         col += 1
-        self._model_label = tk.Label(r2, text="Model", **opts)
+        self._model_label = tk.Label(settings1, text="Model", **opts)
         self._model_label.grid(row=0, column=col, **pad)
         col += 1
-        self._model_menu = tk.OptionMenu(r2, self.gemini_model_var, *GEMINI_MODELS)
+        self._model_menu = tk.OptionMenu(settings1, self.gemini_model_var, *GEMINI_MODELS)
         _style_option_menu(self._model_menu)
         self._model_menu.grid(row=0, column=col, sticky=tk.W, **pad)
-        # Rebuild with speed tick marks (more · = faster)
         _apply_model_menu_labels(self._model_menu, self.gemini_model_var, GEMINI_MODELS)
         _add_tooltip(self._model_menu, "Gemini model. More · = faster. Default = best value.")
         col += 1
-        self._model_refresh_btn = tk.Button(r2, text="⟳", width=2, command=self._on_refresh_models, **btn_opts)
+        self._model_refresh_btn = tk.Button(settings1, text="⟳", width=2, command=self._on_refresh_models, **btn_opts)
         self._model_refresh_btn.grid(row=0, column=col, **pad)
         col += 1
-        tk.Label(r2, text="Mod", **opts).grid(row=0, column=col, **pad)
+        tk.Label(settings1, text="Mode", **opts).grid(row=0, column=col, **pad)
         col += 1
-        self._modality_menu = tk.OptionMenu(r2, self.modality_var, *MODALITIES)
+        self._modality_menu = tk.OptionMenu(settings1, self.modality_var, *MODALITIES)
         _style_option_menu(self._modality_menu)
         self._modality_menu.grid(row=0, column=col, sticky=tk.W, **pad)
         col += 1
-        tk.Label(r2, text="Simul.", **opts).grid(row=0, column=col, **pad)
+        tk.Label(settings1, text="Parallel", **opts).grid(row=0, column=col, **pad)
         col += 1
         _conc_max = 16 if self._high_end_gpu else 8
         self.concurrent_var = tk.StringVar(value="2")
-        self._concurrent_spinbox = tk.Spinbox(r2, from_=1, to=_conc_max, width=2, textvariable=self.concurrent_var)
+        self._concurrent_spinbox = tk.Spinbox(settings1, from_=1, to=_conc_max, width=2, textvariable=self.concurrent_var)
         self._concurrent_spinbox.grid(row=0, column=col, sticky=tk.W, **pad)
         col += 1
         self.gemini_paid_key_var = tk.BooleanVar(value=False)
-        _paid_ck = tk.Checkbutton(r2, text="Paid key", variable=self.gemini_paid_key_var, **opts)
+        _paid_ck = tk.Checkbutton(settings1, text="Paid key", variable=self.gemini_paid_key_var, **opts)
         _paid_ck.grid(row=0, column=col, sticky=tk.W, **pad)
         _add_tooltip(_paid_ck, "Gemini: allow parallel batch (check if using paid API key; uncheck for free tier to avoid rate limits).")
         col += 1
-        tk.Label(r2, text="Pass", **opts).grid(row=0, column=col, **pad)
+        tk.Label(settings1, text="Passes", **opts).grid(row=0, column=col, **pad)
         col += 1
         self.passes_var = tk.StringVar(value="1")
-        tk.Spinbox(r2, from_=1, to=5, width=2, textvariable=self.passes_var).grid(row=0, column=col, sticky=tk.W, **pad)
-        col += 1
-        tk.Label(r2, text="Expand", **opts).grid(row=0, column=col, **pad)
-        col += 1
-        expand_toggle = tk.Frame(r2)
-        expand_toggle.grid(row=0, column=col, sticky=tk.W, **pad)
+        tk.Spinbox(settings1, from_=1, to=5, width=2, textvariable=self.passes_var).grid(row=0, column=col, sticky=tk.W, **pad)
+
+        settings2 = tk.Frame(toolbar_wrapper, relief=tk.FLAT, bd=0)
+        settings2.pack(side=tk.TOP, fill=tk.X)
+        tk.Label(settings2, text="Expand", **opts).pack(side=tk.LEFT, **pad)
+        expand_toggle = tk.Frame(settings2)
+        expand_toggle.pack(side=tk.LEFT, **pad)
         rb_whole = tk.Radiobutton(expand_toggle, text="Whole doc", variable=self.whole_document_var, value=True, **opts)
         rb_whole.pack(side=tk.LEFT)
         rb_block = tk.Radiobutton(expand_toggle, text="Block-by-block", variable=self.whole_document_var, value=False, **opts)
@@ -926,23 +934,26 @@ class App:
         _add_tooltip(rb_whole, "Expand entire document in one API call")
         _add_tooltip(rb_block, "Expand each block separately; shows per-block progress (default). Switch during run to cancel and restart.")
         self.whole_document_var.trace_add("write", self._on_whole_doc_change)
-        col += 1
-        tk.Checkbutton(r2, text="Learn", variable=self.auto_learn_var, **opts).grid(row=0, column=col, sticky=tk.W, **pad)
-        col += 1
-        tk.Checkbutton(r2, text="Layered Training", variable=self.include_learned_var, **opts).grid(row=0, column=col, sticky=tk.W, **pad)
-        col += 1
-        tk.Checkbutton(r2, text="Autosave", variable=self.autosave_var, **opts).grid(row=0, column=col, sticky=tk.W, **pad)
-        col += 1
-        tk.Label(r2, text="Examples", **opts).grid(row=0, column=col, sticky=tk.W, **pad)
-        col += 1
-        self._examples_entry = tk.Entry(r2, textvariable=self.examples_var)
-        self._examples_entry.grid(row=0, column=col, sticky=tk.EW, **pad)
-        col += 1
-        tk.Button(r2, text="…", width=2, command=self._on_browse_examples, **btn_opts).grid(row=0, column=col, **pad)
-        col += 1
-        tk.Button(r2, text="Refresh", width=6, command=self._refresh_train_list, **btn_opts).grid(row=0, column=col, **pad)
-        col += 1
-        tk.Button(r2, text="Test", width=4, command=self._on_test_connection, **btn_opts).grid(row=0, column=col, **pad)
+        tk.Checkbutton(settings2, text="Learn", variable=self.auto_learn_var, **opts).pack(side=tk.LEFT, **pad)
+        tk.Checkbutton(settings2, text="Layered Training", variable=self.include_learned_var, **opts).pack(side=tk.LEFT, **pad)
+        tk.Checkbutton(settings2, text="Autosave", variable=self.autosave_var, **opts).pack(side=tk.LEFT, **pad)
+        tk.Label(settings2, text="Examples", **opts).pack(side=tk.LEFT, **pad)
+        self._examples_entry = tk.Entry(settings2, textvariable=self.examples_var)
+        self._examples_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, **pad)
+        tk.Button(settings2, text="…", width=2, command=self._on_browse_examples, **btn_opts).pack(side=tk.LEFT, **pad)
+        tk.Button(settings2, text="Refresh pairs", width=10, command=self._refresh_train_list, **btn_opts).pack(
+            side=tk.LEFT, **pad
+        )
+        tk.Button(settings2, text="Test key", width=7, command=self._on_test_connection, **btn_opts).pack(side=tk.LEFT, **pad)
+
+        # Legacy scroll helpers now unused (kept for compatibility/no-op).
+        self._toolbar_canvas = None
+        self._toolbar_scrollbar = None
+        self._toolbar_frame = None
+        self._toolbar_canvas_window = None
+        self._toolbar_scroll_after_id = None
+
+        col = 0
         # Keyboard shortcuts (Ctrl+O/S/E, Left/Right for prev/next file)
         self.root.bind("<Control-o>", lambda e: (self._on_open(), "break")[1])
         self.root.bind("<Control-s>", lambda e: (self._on_save(), "break")[1])
@@ -957,6 +968,8 @@ class App:
 
     def _schedule_toolbar_scroll(self) -> None:
         """Throttle: run _update_toolbar_scroll once after 50 ms of no resize."""
+        if getattr(self, "_toolbar_canvas", None) is None:
+            return
         if self._toolbar_scroll_after_id is not None:
             self.root.after_cancel(self._toolbar_scroll_after_id)
         self._toolbar_scroll_after_id = self.root.after(50, self._do_toolbar_scroll)
@@ -968,6 +981,8 @@ class App:
     def _update_toolbar_scroll(self) -> None:
         """Update toolbar scroll region and canvas window size so top third moves with window resizing.
         When narrow: horizontal scroll; when wide: canvas window fills viewport so toolbar uses full width."""
+        if getattr(self, "_toolbar_canvas", None) is None or getattr(self, "_toolbar_frame", None) is None:
+            return
         self._toolbar_frame.update_idletasks()
         req_w = self._toolbar_frame.winfo_reqwidth()
         h = self._toolbar_frame.winfo_reqheight()
@@ -1022,18 +1037,29 @@ class App:
         self._image_canvas.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
         self._image_canvas.bind("<Configure>", self._on_image_canvas_configure)
 
-        # Input and output panels
-        content_row = tk.Frame(panes)
+        # Input and output panels (draggable splitter)
+        content_row = tk.PanedWindow(panes, orient=tk.HORIZONTAL, sashrelief=tk.RAISED, sashwidth=6, showhandle=False)
         content_row.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=0, pady=2)
         left = tk.LabelFrame(content_row, text="Input", font=("", 9))
-        left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=2)
         opts = {"wrap": tk.WORD, "font": self._font, "exportselection": False}
         self.input_txt = scrolledtext.ScrolledText(left, **opts)
         self.input_txt.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
         right = tk.LabelFrame(content_row, text="Output", font=("", 9))
-        right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=2)
         self.output_txt = scrolledtext.ScrolledText(right, **opts)
         self.output_txt.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
+        content_row.add(left, minsize=200)
+        content_row.add(right, minsize=200)
+        self._io_pane = content_row
+
+        def _init_sash() -> None:
+            try:
+                w = max(1, content_row.winfo_width() or 1)
+                # Put sash roughly in the middle on first layout.
+                content_row.sash_place(0, w // 2, 0)
+            except Exception:
+                pass
+
+        self.root.after(50, _init_sash)
         # Paired highlight: visible when widget is unfocused (Windows hides "sel" when unfocused)
         for w in (self.input_txt, self.output_txt):
             w.tag_configure("paired", background="#b3d9ff")
@@ -1301,7 +1327,7 @@ class App:
         # Queue label
         self._queue_label = tk.Label(
             status_frame, textvariable=self._queue_label_var, width=10, anchor=tk.CENTER,
-            font=("", 9), fg="#88ff88"
+            font=("", 9), fg="black"
         )
         self._queue_label.grid(row=0, column=4, sticky=tk.W, padx=(2, 2), pady=2)
         # Clear queue button (only visible when queue has items)
@@ -1601,6 +1627,11 @@ class App:
             return
         if not self.whole_document_var.get():  # Switched to block-by-block
             self.cancel_requested = True
+            try:
+                if self._current_cancel_event is not None:
+                    self._current_cancel_event.set()
+            except Exception:
+                pass
             self._restart_with_block_by_block = True
 
     def _on_reexpand(self) -> None:
@@ -1786,7 +1817,7 @@ class App:
 
     def _run_batch(self, files: list, parallel: int) -> None:
         """Run batch expansion in background with file status tracking."""
-        from concurrent.futures import ThreadPoolExecutor, as_completed
+        from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
         backend = (self.backend_var.get() or "gemini").strip() or "gemini"
         api_key = _resolve_api_key(self)
@@ -1824,6 +1855,8 @@ class App:
             return ("429" in sl) or ("resource_exhausted" in sl) or ("rate limit" in sl) or ("too many requests" in sl)
 
         def expand_one(f: Path) -> tuple[Path, bool, str]:
+            if getattr(self, "cancel_requested", False):
+                return (f, False, f"{f.name}: cancelled")
             # Mark as processing
             self.root.after(0, lambda: self._update_batch_file_status(f.name, "processing"))
             from expand_diplomatic.expander import expand_xml
@@ -1832,6 +1865,8 @@ class App:
             max_attempts = 3
             for attempt in range(max_attempts):
                 try:
+                    if getattr(self, "cancel_requested", False):
+                        return (f, False, f"{f.name}: cancelled")
                     result = expand_xml(
                         xml, examples,
                         model=model,
@@ -1843,14 +1878,22 @@ class App:
                         # Block-level concurrency (Gemini): allow only when paid key to avoid 429s.
                         max_concurrent=(1 if (backend == "gemini" and not self.gemini_paid_key_var.get()) else None),
                     )
+                    if getattr(self, "cancel_requested", False):
+                        return (f, False, f"{f.name}: cancelled")
                     out_path.write_text(result, encoding="utf-8")
                     return (f, True, f.name)
                 except Exception as e:
+                    if getattr(self, "cancel_requested", False):
+                        return (f, False, f"{f.name}: cancelled")
                     if _is_timeout(e) and attempt < max_attempts - 1:
                         continue
                     if _is_rate_limit(e) and attempt < max_attempts - 1:
-                        # Backoff then retry (helps on 429 bursts during batch)
-                        time.sleep(10 * (attempt + 1))
+                        # Backoff then retry (helps on 429 bursts during batch); allow fast cancel.
+                        delay = 10 * (attempt + 1)
+                        for _ in range(int(delay / 0.25)):
+                            if getattr(self, "cancel_requested", False):
+                                return (f, False, f"{f.name}: cancelled")
+                            time.sleep(0.25)
                         continue
                     return (f, False, f"{f.name}: {type(e).__name__}: {e}")
 
@@ -1885,37 +1928,57 @@ class App:
                     self.root.after(5000, self._hide_batch_panel)
 
             try:
-                with ThreadPoolExecutor(max_workers=parallel) as executor:
-                    future_to_file = {executor.submit(expand_one, f): f for f in files}
-                    for future in as_completed(future_to_file):
-                        if getattr(self, "cancel_requested", False):
-                            cancelled[0] = True
-                            # Mark remaining as pending (not processed)
-                            for fut, fpath in future_to_file.items():
-                                if not fut.done():
-                                    fut.cancel()
-                            break
+                executor = ThreadPoolExecutor(max_workers=parallel)
+                it = iter(files)
+                futures = set()
+
+                def submit_next() -> None:
+                    try:
+                        nxt = next(it)
+                    except StopIteration:
+                        return
+                    futures.add(executor.submit(expand_one, nxt))
+
+                for _ in range(max(1, parallel)):
+                    submit_next()
+
+                while futures:
+                    if getattr(self, "cancel_requested", False):
+                        cancelled[0] = True
+                        # Cancel pending work and return quickly (do not wait for running futures).
+                        try:
+                            for fut in list(futures):
+                                fut.cancel()
+                            executor.shutdown(wait=False, cancel_futures=True)
+                        except Exception:
+                            pass
+                        break
+
+                    done, futures = wait(futures, return_when=FIRST_COMPLETED)
+                    for future in done:
                         try:
                             f_path, ok, msg = future.result()
                         except Exception as e:
-                            f_path = future_to_file[future]
                             ok, msg = False, str(e)
-                        completed[0] += 1
-                        # Update file status
-                        status = "done" if ok else "failed"
-                        self.root.after(0, lambda fn=f_path.name, s=status: self._update_batch_file_status(fn, s))
-                        if not ok:
-                            failed.append(msg)
+                            # We may not know the file reliably here; skip filename.
+                            f_path = None
+                        if f_path is not None:
+                            completed[0] += 1
+                            status = "done" if ok else ("pending" if "cancelled" in (msg or "").lower() else "failed")
+                            self.root.after(0, lambda fn=f_path.name, s=status: self._update_batch_file_status(fn, s))
+                            if not ok and status == "failed":
+                                failed.append(msg)
 
-                        def update_progress(c=completed[0], t=total, m=msg, o=ok):
-                            pct = int(100 * c / t)
-                            self.progress_bar["value"] = pct
-                            status_msg = f"Batch: {c}/{t}"
-                            if not o:
-                                status_msg += f" (failed: {m[:30]})"
-                            _status(self, status_msg)
+                            def update_progress(c=completed[0], t=total, m=msg, o=ok):
+                                pct = int(100 * c / t)
+                                self.progress_bar["value"] = pct
+                                status_msg = f"Batch: {c}/{t}"
+                                if not o and status == "failed":
+                                    status_msg += f" (failed: {m[:30]})"
+                                _status(self, status_msg)
 
-                        self.root.after(0, update_progress)
+                            self.root.after(0, update_progress)
+                        submit_next()
             finally:
                 self.root.after(0, on_done)
 
@@ -1934,6 +1997,13 @@ class App:
         if not self.expand_running:
             return
         self.cancel_requested = True
+        try:
+            if self._current_cancel_event is not None:
+                self._current_cancel_event.set()
+        except Exception:
+            pass
+        # Bump run id so any late worker completion cannot overwrite UI/output.
+        self.expand_run_id = getattr(self, "expand_run_id", 0) + 1
         _stop_hang_check(self)
         self.expand_btn.config(state=tk.NORMAL)
         self.cancel_btn.config(state=tk.DISABLED)
