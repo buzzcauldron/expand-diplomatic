@@ -1121,7 +1121,7 @@ class App:
     def _build_main(self) -> None:
         # Vertical PanedWindow: top = content (image + input/output), bottom = Review + Train (draggable sash)
         self._main_paned = tk.PanedWindow(
-            self.root, orient=tk.VERTICAL, sashrelief=tk.RAISED, sashwidth=6, showhandle=False
+            self.root, orient=tk.VERTICAL, sashrelief=tk.RAISED, sashwidth=8, showhandle=True
         )
         self._main_paned.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=4, pady=2)
 
@@ -1151,7 +1151,7 @@ class App:
         self._image_canvas.bind("<Configure>", self._on_image_canvas_configure)
 
         # Input and output panels (draggable splitter)
-        content_row = tk.PanedWindow(panes, orient=tk.HORIZONTAL, sashrelief=tk.RAISED, sashwidth=6, showhandle=False)
+        content_row = tk.PanedWindow(panes, orient=tk.HORIZONTAL, sashrelief=tk.RAISED, sashwidth=6, showhandle=True)
         content_row.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=0, pady=2)
         left = tk.LabelFrame(content_row, text="Input", font=("", 9))
         opts = {"wrap": tk.WORD, "font": self._font, "exportselection": False}
