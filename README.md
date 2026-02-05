@@ -102,8 +102,10 @@ python gui.py
 - **Whole doc** – When checked (default), expand the entire document in one API call. Uncheck for block-by-block expansion (e.g. for very long documents or progress display).
 - **Modality** – How much to expand manuscript transcriptions: conservative, normalize, full, aggressive, or **local** (tuned for non-Gemini models like Ollama; not the default).
 - **Simul.** – How many blocks to process at once. Lower this (e.g. 1) if you see rate limit errors.
-- **Learn** – When on, the app saves new abbreviation pairs from each expansion to improve future runs.
+- **Learn** – When on, the app saves new abbreviation pairs from each expansion to improve future runs (staged in **Review learned** for you to accept or reject).
 - **Layered Training** – When on, includes learned examples in the expansion prompt (curated + learned).
+- **Max ex** – Cap on how many examples are sent in each prompt (blank = use all). Helps with long lists.
+- **Strategy** – When Max ex is set: **longest-first** (prefer longer diplomatic forms) or **most-recent** (last N in list).
 
 ### If expansion fails
 
@@ -121,6 +123,22 @@ python gui.py
 - **Image panel** – Click the 🖼▶ strip on the right to expand and upload an image for reference.
 - **Passes** – Run expansion more than once in a row to refine the text.
 - **Persistent preferences** – Your selections (Backend, Model, Modality, Whole doc, etc.) and last-opened directory are saved when you quit and restored when you reopen.
+- **Status bar** – Appears when you first click **Expand** (progress, elapsed time, format, queue) and stays visible for the rest of the session.
+- **Max ex / Strategy** – In settings, cap how many examples are sent in each prompt (**Max ex**) and choose **longest-first** (prefer longer forms) or **most-recent**. Helps stay within token limits on long example lists.
+
+### Review learned (staged pairs)
+
+When **Learn** is on and you expand with Gemini, the app can **stage** new abbreviation pairs for you to review instead of adding them straight to your examples.
+
+- **Review learned** panel (bottom) – Click **▶** to expand. Lists staged pairs as “diplomatic → full” (one per line). Pairs that already exist in your rules (project + learned + personal, per **Layered Training**) are not suggested again.
+- **Search** – Filter the list by typing in the search box.
+- **Accept** – Add the selected pair to your **personal** learned set (stored in your config directory). Use **Promote** to add it to the **project** `examples.json` instead.
+- **Reject** – Remove from the list; that form won’t be suggested again for the next few documents.
+- **Edit** – Change diplomatic or full text in the list; **Save edits** (or autosave when you leave the field) writes changes to the queue.
+- **Accept all** / **Reject all** – Process the whole list in one go.
+- **Export…** – Save the current staged pairs to a JSON file.
+
+Personal learned pairs are used when **Layered Training** is on; project examples and project `learned_examples.json` take precedence. See [Teaching the app](#teaching-the-app-examples) below.
 
 ---
 
@@ -149,6 +167,10 @@ Open `examples.json` in a text editor. Add pairs like this:
 
 More examples = better results. The app also saves learned pairs from expansions when **Learn** is on. Use **Layered Training** to include those learned pairs in the prompt.
 
+**Where learned pairs live:**
+- **Project:** `examples.json` (curated) and `learned_examples.json` (auto-learned, same folder as your examples file). These are shared with the project.
+- **Personal:** A “learned” file in your config directory (e.g. `~/.config/expand_diplomatic/` on Linux). Used when **Layered Training** is on; project examples always take precedence. Use **Accept** in Review learned to add to personal, or **Promote** to add to project `examples.json`.
+
 **Suggested workflow:** Open an XML file → add a few pairs from selection (In/Out) → Expand → Save. Use **Diff** to spot missed forms, add more pairs, then **Re-expand**. For many files, use **Batch…** once settings and examples are good. See [Speed & efficiency](docs/SPEED_EFFICIENCY.md) for more workflow notes.
 
 ---
@@ -176,6 +198,22 @@ Use the local backend (no API key):
 ```bash
 python -m expand_diplomatic --backend local --file document.xml
 ```
+
+Rules-only (no Ollama, no API): expand using only your example pairs:
+```bash
+python -m expand_diplomatic --backend rules --file document.xml
+```
+
+Limit how many examples are sent in each prompt (useful for long lists):
+```bash
+python -m expand_diplomatic --file document.xml --max-examples 50 --example-strategy longest-first
+```
+
+**Evaluation harness** – Compare rules-only, local (Ollama), and Gemini on a corpus and write a report:
+```bash
+python -m expand_diplomatic eval --corpus-dir ./test_xml --out-dir ./eval_report
+```
+See `python -m expand_diplomatic eval --help` for options.
 
 ---
 
@@ -370,10 +408,15 @@ Useful flags when running from the command line:
 
 - `--examples PATH` — Use a different examples file
 - `--model ID` — Change Gemini model (default: gemini-2.5-flash)
+- `--backend {gemini,local,rules}` — `gemini` (API), `local` (Ollama + rules), or `rules` (examples only, no API/Ollama)
 - `--block-by-block` — Expand each block separately instead of whole document in one call
 - `--modality {full,conservative,normalize,aggressive,local}` — Manuscript expansion mode (`local` is tuned for non-Gemini models)
+- `--max-examples N` — Cap number of examples in each prompt (default: use all)
+- `--example-strategy {longest-first,most-recent}` — Which examples to pick when capped
 - `--passes N` — Run expansion multiple times (1–5)
 - `--files-api` — Upload the full file to Gemini for extra context
+- `train` subcommand — Add pairs from the CLI: `python -m expand_diplomatic train --add "diplomatic" "full"` (see `train --help`)
+- `eval` subcommand — Run the evaluation harness: `python -m expand_diplomatic eval --corpus-dir PATH --out-dir PATH` (see `eval --help`)
 
 See `.env.example` for environment variables (timeouts, retries, etc.).
 
