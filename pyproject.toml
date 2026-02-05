@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "expand-diplomatic"
-version = "0.3.3"
+version = "0.3.4"
 description = "Expand diplomatic transcriptions to full form via Gemini API"
 # SPDX license expression (PEP 639)
 license = "MIT"

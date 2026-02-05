@@ -6,6 +6,8 @@ The project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ## [Unreleased]
 
+## [0.3.4] - 2025-02-04
+
 ### Added
 
 - **Review learned panel** (staged pairs): when Learn is on and Gemini is used, new pairs are staged for review instead of auto-added. Accept (to personal learned), Promote (to project examples), Reject (with short cooldown), Edit, Save edits, Accept all, Reject all, Export. Pairs already in the effective rules (project + learned + personal, per Layered Training) are not suggested again.
@@ -21,6 +23,11 @@ The project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 - **Review list**: Single Accept or Reject keeps selection and scroll position on the next item (no jump to top).
 - **Staging filter**: Auto-learn does not suggest pairs that already exist in the effective rules (same layers as expand uses).
 - **README**: Documented Review learned, eval subcommand, --max-examples/--example-strategy, --backend rules, train/eval subcommands, personal vs project learned, status bar, Max ex/Strategy in settings.
+- **.env save path**: When the app is run as an installed package (e.g. system pip), "Save to .env" writes to the user config directory instead of site-packages, avoiding permission denied.
+- **Focus during expand**: Highlighted (synced) block stays in view in both panels as partial results arrive and when expansion finishes; output and input scroll to keep the block visible.
+- **Double-click / click alignment**: Single-click and double-click scroll both panels so the corresponding blocks are at the same vertical position (parallel); new _scroll_line_to_top helper.
+- **Resizable dialogs**: Diff, Edit pair, Yes/No, API key, and error dialogs are resizable in height and width with sensible minsize.
+- **Middle paned**: Vertical and horizontal PanedWindow sash show handle and (vertical) wider sash so the middle/content area can be resized easily.
 
 ## [0.3.3] - 2025-01-30
 
