@@ -268,7 +268,7 @@ You need [Docker](https://docs.docker.com/get-docker/) installed and running.
 ### Running from source on Windows
 
 1. **Install Python 3.10+** from [python.org](https://www.python.org/downloads/). During setup, check **“Add Python to PATH”** so you can use `python` from Command Prompt or PowerShell.
-2. Open **Command Prompt** (`cmd`) or **PowerShell** and go to the project folder, e.g. `cd C:\Users\You\magic-elise-tool`.
+2. Open **Command Prompt** (`cmd`) or **PowerShell** and go to the project folder, e.g. `cd C:\Users\You\expand-diplomatic`.
 3. Create and activate a virtual environment:
    ```bat
    python -m venv .venv
