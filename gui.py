@@ -870,11 +870,14 @@ class App:
         # Top third: toolbar fills width and moves with window resizing; essential row always visible
         toolbar_wrapper = tk.Frame(self.root, relief=tk.FLAT, bd=0)
         toolbar_wrapper.pack(side=tk.TOP, fill=tk.X, padx=2, pady=2)
-        pad = dict(padx=2, pady=2)  # external spacing
+        pad = dict(padx=4, pady=3)  # spacing between buttons so labels aren’t cramped
         # Make controls less cramped: consistent font + internal padding
         font9 = ("", 9)
         opts = {"font": font9, "takefocus": True}
-        btn_opts = {"font": font9, "takefocus": True, "padx": 6, "pady": 2}
+        btn_opts = {"font": font9, "takefocus": True, "padx": 8, "pady": 2}
+
+        def _sep(parent: tk.Widget, width: int = 14) -> None:
+            tk.Frame(parent, width=width, height=1, relief=tk.FLAT).pack(side=tk.LEFT)
 
         def _style_option_menu(om: tk.OptionMenu) -> None:
             # OptionMenu wraps a Menubutton + Menu; make hit target bigger and consistent.
@@ -886,9 +889,6 @@ class App:
                 om["menu"].configure(font=font9, tearoff=0)
             except Exception:
                 pass
-
-        def _sep(parent: tk.Widget) -> None:
-            tk.Frame(parent, width=10, height=1, relief=tk.FLAT).pack(side=tk.LEFT)
 
         # Row 0: Primary actions (always visible)
         actions_row = tk.Frame(toolbar_wrapper, relief=tk.FLAT, bd=0)
@@ -917,6 +917,7 @@ class App:
         tk.Button(actions_row, text="Output→TXT", command=self._on_save_output_txt, width=10, **btn_opts).pack(
             side=tk.LEFT, **pad
         )
+        _sep(actions_row)
         tk.Button(actions_row, text="Diff", command=self._on_diff, width=4, **btn_opts).pack(side=tk.LEFT, **pad)
 
         # Row 1: Core settings (always visible; split into 2 compact lines)

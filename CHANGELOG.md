@@ -6,6 +6,22 @@ The project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html
 
 ## [Unreleased]
 
+### Added
+
+- **Review learned panel** (staged pairs): when Learn is on and Gemini is used, new pairs are staged for review instead of auto-added. Accept (to personal learned), Promote (to project examples), Reject (with short cooldown), Edit, Save edits, Accept all, Reject all, Export. Pairs already in the effective rules (project + learned + personal, per Layered Training) are not suggested again.
+- **Eval subcommand**: `python -m expand_diplomatic eval --corpus-dir PATH --out-dir PATH` to compare rules-only, local (Ollama), and Gemini outputs and write a report.
+- **Backend "rules"**: CLI and expander support `--backend rules` for expansion using only example pairs (no API, no Ollama).
+- **Prompt budget**: GUI **Max ex** and **Strategy** (longest-first / most-recent); CLI `--max-examples` and `--example-strategy` to cap examples per prompt.
+- **Personal vs project learned**: personal learned stored in config directory; **Promote** in Review adds to project `examples.json`; Layered Training uses both with project taking precedence.
+
+### Changed
+
+- **Status bar**: Hidden at startup; shown when user first clicks Expand and stays visible for the session.
+- **Mouse wheel**: Scroll works in all panels and dialogs (MouseWheel, Button-4/5); toolbar button spacing increased (pad and separators) so labels are less cramped.
+- **Review list**: Single Accept or Reject keeps selection and scroll position on the next item (no jump to top).
+- **Staging filter**: Auto-learn does not suggest pairs that already exist in the effective rules (same layers as expand uses).
+- **README**: Documented Review learned, eval subcommand, --max-examples/--example-strategy, --backend rules, train/eval subcommands, personal vs project learned, status bar, Max ex/Strategy in settings.
+
 ## [0.3.3] - 2025-01-30
 
 ### Added
