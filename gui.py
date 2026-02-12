@@ -18,7 +18,6 @@ from tkinter import ttk
 from dotenv import load_dotenv, set_key
 
 ROOT_DIR = Path(__file__).resolve().parent
-ENV_PATH = ROOT_DIR / ".env"
 ENV_EXAMPLE = ROOT_DIR / ".env.example"
 
 
@@ -35,13 +34,34 @@ def _config_dir() -> Path:
 PREFS_PATH = _config_dir() / "preferences.json"
 
 
+def _get_env_path() -> Path:
+    """Return a writable .env path: project root when run from source, else config dir.
+    Avoids writing under site-packages when the app is installed (e.g. system pip)."""
+    project_root = ROOT_DIR
+    # Prefer project root only if it looks like a dev tree and is writable
+    if (project_root / "pyproject.toml").exists() or (project_root / ".env.example").exists():
+        try:
+            test = project_root / ".env"
+            if test.exists():
+                test.stat()  # ensure readable
+            else:
+                test.touch()
+                test.unlink()
+            return test
+        except (OSError, PermissionError):
+            pass
+    return _config_dir() / ".env"
+
+
 def _ensure_env() -> None:
     """Create .env from .env.example if missing; then load .env."""
-    if not ENV_PATH.exists() and ENV_EXAMPLE.exists():
+    env_path = _get_env_path()
+    if not env_path.exists() and ENV_EXAMPLE.exists():
         import shutil
 
-        shutil.copy(ENV_EXAMPLE, ENV_PATH)
-    load_dotenv(ENV_PATH)
+        env_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(ENV_EXAMPLE, env_path)
+    load_dotenv(env_path)
 
 
 _ensure_env()
@@ -296,6 +316,15 @@ def _expand_worker(
                         end_idx = out.index(f"1.0 + {e} chars")
                         out.tag_remove("paired", "1.0", tk.END)
                         out.tag_add("paired", start_idx, end_idx)
+                        out.see(start_idx)
+                    # Keep input panel scrolled to the same block so highlight stays in view
+                    inp = app.input_txt
+                    inp_content = inp.get("1.0", tk.END)
+                    inp_ranges = app._get_block_ranges_cached(inp_content)
+                    if block_idx is not None and block_idx < len(inp_ranges):
+                        si, ei = inp_ranges[block_idx]
+                        start_idx_inp = inp.index(f"1.0 + {si} chars")
+                        inp.see(start_idx_inp)
                 except Exception:
                     pass
         app.root.after(0, update_output)
@@ -404,11 +433,23 @@ def _expand_worker(
                     end_idx = out.index(f"1.0 + {e} chars")
                     out.tag_remove("paired", "1.0", tk.END)
                     out.tag_add("paired", start_idx, end_idx)
+                    out.see(start_idx)
+                # Keep input panel scrolled to the same block
+                inp = app.input_txt
+                inp_content = inp.get("1.0", tk.END)
+                inp_ranges = app._get_block_ranges_cached(inp_content)
+                if block_idx < len(inp_ranges):
+                    si, ei = inp_ranges[block_idx]
+                    start_idx_inp = inp.index(f"1.0 + {si} chars")
+                    inp.see(start_idx_inp)
             except Exception:
                 pass
-        
+
         elapsed = int(time.time() - app.expand_start_time)
         _status(app, f"Done in {elapsed}s.")
+        # Auto-detect paid: successful Gemini run → tick Paid key so next run can use parallel
+        if backend == "gemini" and getattr(app, "gemini_paid_key_var", None) is not None:
+            app.gemini_paid_key_var.set(True)
         # Auto-learn: quietly train local model on Gemini results in background
         if backend == "gemini" and getattr(app, "auto_learn_var", None) and app.auto_learn_var.get():
             ex_path = Path(app.examples_var.get().strip() or str(DEFAULT_EXAMPLES))
@@ -471,6 +512,8 @@ def _ask_yesno(parent: tk.Tk | tk.Toplevel, title: str, message: str) -> bool:
     win.title(title)
     win.transient(parent)
     win.grab_set()
+    win.minsize(320, 100)
+    win.resizable(True, True)
     f = tk.Frame(win, padx=12, pady=10)
     f.pack(fill=tk.BOTH, expand=True)
     tk.Label(f, text=message, font=font9, justify=tk.LEFT, wraplength=420).pack(anchor=tk.W)
@@ -505,6 +548,8 @@ def _show_api_key_dialog(
     win.title(title)
     win.transient(app.root)
     win.grab_set()
+    win.minsize(360, 140)
+    win.resizable(True, True)
     f = tk.Frame(win, padx=12, pady=12)
     f.pack(fill=tk.BOTH, expand=True)
     tk.Label(f, text=message, wraplength=400).pack(anchor=tk.W)
@@ -512,7 +557,7 @@ def _show_api_key_dialog(
     e = tk.Entry(f, textvariable=var, width=48, show="*")
     e.pack(fill=tk.X, pady=(4, 8))
     save_var = tk.BooleanVar(value=True)
-    tk.Checkbutton(f, text="Save to .env (project root)", variable=save_var).pack(anchor=tk.W)
+    tk.Checkbutton(f, text="Save to .env", variable=save_var).pack(anchor=tk.W)
     btns = tk.Frame(f)
     btns.pack(fill=tk.X, pady=(8, 0))
 
@@ -532,11 +577,13 @@ def _show_api_key_dialog(
         save = save_var.get()
         if save:
             try:
-                set_key(ENV_PATH, "GEMINI_API_KEY", key)
+                env_path = _get_env_path()
+                env_path.parent.mkdir(parents=True, exist_ok=True)
+                set_key(env_path, "GEMINI_API_KEY", key)
             except Exception as ex:
                 messagebox.showerror("Save .env", str(ex), parent=win)
                 return
-            load_dotenv(ENV_PATH)
+            load_dotenv(_get_env_path())
         if callable(on_ok):
             on_ok(key, save)
         _close_key_dialog()
@@ -603,6 +650,8 @@ def _show_api_error_dialog(
     win.title("Expand failed" if is_retry else "No API key")
     win.transient(app.root)
     win.grab_set()
+    win.minsize(380, 160)
+    win.resizable(True, True)
     f = tk.Frame(win, padx=12, pady=12)
     f.pack(fill=tk.BOTH, expand=True)
     prompt = "Expand failed:\n\n%s\n\nWhat do you want to do?" % message if is_retry else "No API key set.\n\nWhat do you want to do?"
@@ -694,6 +743,9 @@ def _run_expand_internal(
         max_concurrent = max(1, min(8, mc))
     except (ValueError, AttributeError):
         max_concurrent = 2
+    # Free key: force sequential and cap examples to avoid rate limits
+    if backend == "gemini" and not (getattr(app, "gemini_paid_key_var", None) and app.gemini_paid_key_var.get()):
+        max_concurrent = 1
     try:
         pv = int(app.passes_var.get().strip() or "1")
         passes = max(1, min(5, pv))
@@ -744,6 +796,12 @@ def _run_expand_internal(
                 max_examples = n
     except (ValueError, TypeError):
         pass
+    # Free key: cap examples per request to reduce tokens and latency
+    if backend == "gemini" and not (getattr(app, "gemini_paid_key_var", None) and app.gemini_paid_key_var.get()):
+        if max_examples is not None:
+            max_examples = min(max_examples, 15)
+        else:
+            max_examples = 15
     example_strategy = "longest-first"
     if getattr(app, "example_strategy_var", None):
         es = app.example_strategy_var.get().strip()
@@ -961,13 +1019,21 @@ class App:
         col += 1
         _conc_max = 16 if self._high_end_gpu else 8
         self.concurrent_var = tk.StringVar(value="2")
+        self._paid_parallel = 2  # parallel value when Gemini + paid; restored when toggling paid on
         self._concurrent_spinbox = tk.Spinbox(settings1, from_=1, to=_conc_max, width=2, textvariable=self.concurrent_var)
         self._concurrent_spinbox.grid(row=0, column=col, sticky=tk.W, **pad)
+        _add_tooltip(self._concurrent_spinbox, "Parallel block requests. Free key = 1; paid key = your choice (saved when you uncheck Paid).")
         col += 1
         self.gemini_paid_key_var = tk.BooleanVar(value=False)
         _paid_ck = tk.Checkbutton(settings1, text="Paid key", variable=self.gemini_paid_key_var, **opts)
         _paid_ck.grid(row=0, column=col, sticky=tk.W, **pad)
-        _add_tooltip(_paid_ck, "Gemini: allow parallel batch (check if using paid API key; uncheck for free tier to avoid rate limits).")
+        _add_tooltip(
+            _paid_ck,
+            "Gemini: unchecked = free key (parallel 1, max 15 examples). Checked = paid key (use Parallel & Max ex). "
+            "Box is auto-ticked after a successful Gemini expand; uncheck if you hit rate limits."
+        )
+        self.gemini_paid_key_var.trace_add("write", lambda *a: self._sync_parallel_to_tier())
+        self.concurrent_var.trace_add("write", lambda *a: self._sync_paid_parallel_from_spinbox())
         col += 1
         tk.Label(settings1, text="Passes", **opts).grid(row=0, column=col, **pad)
         col += 1
@@ -979,7 +1045,7 @@ class App:
         self.max_examples_var = tk.StringVar(value="")
         self._max_examples_spinbox = tk.Spinbox(settings1, from_=0, to=500, width=4, textvariable=self.max_examples_var)
         self._max_examples_spinbox.grid(row=0, column=col, sticky=tk.W, **pad)
-        _add_tooltip(self._max_examples_spinbox, "Cap on examples injected per call (0 or empty = use all).")
+        _add_tooltip(self._max_examples_spinbox, "Cap on examples injected per call (0 or empty = use all). With free key, max 15 is used.")
         col += 1
         EXAMPLE_STRATEGIES = ("longest-first", "most-recent")
         tk.Label(settings1, text="Strategy", **opts).grid(row=0, column=col, **pad)
@@ -1116,7 +1182,41 @@ class App:
                     self.concurrent_var.set("8")
             except ValueError:
                 self.concurrent_var.set("2")
+        self._sync_parallel_to_tier()
         self.root.after(10, self._update_toolbar_scroll)
+
+    def _sync_parallel_to_tier(self) -> None:
+        """Set Parallel spinbox to 1 (free) or saved paid value when backend is Gemini."""
+        backend = _get_backend_value(self.backend_var.get())
+        if backend != "gemini":
+            return
+        _conc_max = 16 if self._high_end_gpu else 8
+        if self.gemini_paid_key_var.get():
+            v = max(1, min(_conc_max, self._paid_parallel))
+            self._paid_parallel = v
+            self.concurrent_var.set(str(v))
+        else:
+            try:
+                v = int(self.concurrent_var.get().strip() or "2")
+                self._paid_parallel = max(1, min(_conc_max, v))
+            except ValueError:
+                self._paid_parallel = 2
+            self.concurrent_var.set("1")
+
+    def _sync_paid_parallel_from_spinbox(self) -> None:
+        """When Gemini + paid, keep _paid_parallel in sync with spinbox. When Gemini + free, keep spinbox at 1."""
+        backend = _get_backend_value(self.backend_var.get())
+        if backend != "gemini":
+            return
+        if not self.gemini_paid_key_var.get():
+            self._sync_parallel_to_tier()
+            return
+        try:
+            v = int(self.concurrent_var.get().strip() or "2")
+            _conc_max = 16 if self._high_end_gpu else 8
+            self._paid_parallel = max(1, min(_conc_max, v))
+        except ValueError:
+            pass
 
     def _build_main(self) -> None:
         # Vertical PanedWindow: top = content (image + input/output), bottom = Review + Train (draggable sash)
@@ -1476,6 +1576,8 @@ class App:
         win = tk.Toplevel(self.root)
         win.title("Edit pair")
         win.transient(self.root)
+        win.minsize(280, 120)
+        win.resizable(True, True)
         frm = tk.Frame(win, padx=12, pady=12)
         frm.pack(fill=tk.BOTH, expand=True)
         tk.Label(frm, text="Diplomatic", font=("", 9)).grid(row=0, column=0, sticky=tk.W, padx=2, pady=2)
@@ -1819,6 +1921,17 @@ class App:
         cache[key] = ranges
         return ranges
 
+    def _scroll_line_to_top(self, widget: tk.Text, index: str) -> None:
+        """Scroll the text widget so the line at index is at the top of the visible area (for parallel alignment)."""
+        try:
+            line_num = int(str(index).split(".")[0])
+            end_line = int(widget.index("end-1c").split(".")[0])
+            total = max(1, end_line)
+            frac = max(0.0, min(1.0, (line_num - 1) / total))
+            widget.yview_moveto(frac)
+        except (ValueError, TypeError, tk.TclError):
+            widget.see(index)
+
     def _get_block_at_click(self, widget: tk.Text, event: tk.Event) -> tuple[int | None, list[tuple[int, int]], str]:
         """Return (block_idx, ranges, content) for the block at click position, or (None, [], content)."""
         try:
@@ -1841,7 +1954,7 @@ class App:
     def _on_panel_click(self, event: tk.Event) -> None:
         """On click in input or output, select the parallel block in the other panel and align vertically."""
         widget = event.widget
-        block_idx, _, _ = self._get_block_at_click(widget, event)
+        block_idx, ranges, _ = self._get_block_at_click(widget, event)
         if block_idx is None:
             return
         other = self.output_txt if widget is self.input_txt else self.input_txt
@@ -1856,13 +1969,13 @@ class App:
         other.tag_add("paired", start_idx, end_idx)
         other.mark_set("insert", start_idx)
         self._synced_block_idx = block_idx
-        # Scroll to align both blocks at same vertical position
+        # Scroll both panels so the blocks are at the same vertical position (parallel)
         try:
-            clicked_line = widget.index(f"@{event.x},{event.y}").split('.')[0]
-            widget.see(f"{clicked_line}.0")
-            other_line = start_idx.split('.')[0]
-            other.see(f"{other_line}.0")
+            widget_start = widget.index(f"1.0 + {ranges[block_idx][0]} chars")
+            self._scroll_line_to_top(widget, widget_start)
+            self._scroll_line_to_top(other, start_idx)
         except Exception:
+            widget.see("1.0")
             other.see(start_idx)
 
     def _on_panel_double_click(self, event: tk.Event) -> None:
@@ -1896,12 +2009,10 @@ class App:
             other.tag_add("paired", o_start_idx, o_end_idx)
             other.mark_set("insert", o_start_idx)
             self._synced_block_idx = block_idx
-            # Scroll both panels to align the blocks at same vertical position
+            # Scroll both panels so the blocks are at the same vertical position (parallel)
             try:
-                clicked_line = start_idx.split('.')[0]
-                widget.see(f"{clicked_line}.0")
-                other_line = o_start_idx.split('.')[0]
-                other.see(f"{other_line}.0")
+                self._scroll_line_to_top(widget, start_idx)
+                self._scroll_line_to_top(other, o_start_idx)
             except Exception:
                 widget.see(start_idx)
                 other.see(o_start_idx)
@@ -2661,7 +2772,9 @@ class App:
             diff_text = f"Diff failed: {e}"
         win = tk.Toplevel(self.root)
         win.title("Diff: input vs output")
+        win.minsize(400, 200)
         win.geometry("700x400")
+        win.resizable(True, True)
         txt = scrolledtext.ScrolledText(win, font=("Courier", 9), wrap=tk.NONE)
         txt.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
         txt.insert(tk.END, diff_text)
@@ -2803,6 +2916,8 @@ class App:
                 self.gemini_model_var.set(gemini_model)
             conc = p.get("concurrent", "")
             if conc and conc.isdigit():
+                _conc_max = 16 if self._high_end_gpu else 8
+                self._paid_parallel = max(1, min(_conc_max, int(conc)))
                 self.concurrent_var.set(conc)
             if "gemini_paid_key" in p:
                 self.gemini_paid_key_var.set(bool(p["gemini_paid_key"]))

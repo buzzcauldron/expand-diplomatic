@@ -69,6 +69,16 @@ def test_expand_xml_rules() -> None:
     assert "y^e" not in out
 
 
+def test_expand_xml_preserves_structure() -> None:
+    """Block expansion preserves child elements; only text content is replaced."""
+    xml = '<?xml version="1.0"?><root><p>pre <hi>y^e</hi> post</p></root>'
+    ex = [{"diplomatic": "y^e", "full": "the"}]
+    out = expand_xml(xml, ex, backend="rules")
+    assert "<hi>" in out and "</hi>" in out, "child element must be preserved"
+    assert "the" in out and "y^e" not in out
+    assert "pre" in out and "post" in out
+
+
 def test_expand_xml_invalid_raises() -> None:
     """Invalid/non-XML input raises clear error (lxml recover=True can return None)."""
     import pytest

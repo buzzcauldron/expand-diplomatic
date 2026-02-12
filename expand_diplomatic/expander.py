@@ -6,7 +6,7 @@ import os
 import unicodedata
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
 from lxml import etree
 
@@ -358,11 +358,55 @@ def _inner_text(el: etree._Element) -> str:
     return "".join(el.itertext())
 
 
-def _set_inner_text(el: etree._Element, text: str) -> None:
-    """Replace element content with a single text node. Preserves tag and attributes."""
-    for c in list(el):
-        el.remove(c)
-    el.text = text
+def _iter_text_segments(el: etree._Element) -> Iterator[tuple[str, etree._Element, str]]:
+    """Yield (text, element, kind) in document order. kind is 'text' or 'tail'."""
+    if el.text:
+        yield (el.text, el, "text")
+    for child in el:
+        yield from _iter_text_segments(child)
+        if child.tail:
+            yield (child.tail, child, "tail")
+
+
+def _set_inner_text_preserving_structure(el: etree._Element, expanded: str) -> None:
+    """Replace text content with expanded string while preserving child elements and structure."""
+    segments = list(_iter_text_segments(el))
+    if not segments:
+        for c in list(el):
+            el.remove(c)
+        el.text = expanded
+        return
+    if len(segments) == 1:
+        _, target_el, kind = segments[0]
+        if kind == "text":
+            target_el.text = expanded
+        else:
+            target_el.tail = expanded
+        return
+    total_len = sum(len(s[0]) for s in segments)
+    if total_len == 0:
+        for c in list(el):
+            el.remove(c)
+        el.text = expanded
+        return
+    expanded_len = len(expanded)
+    seg_lengths = [len(s[0]) for s in segments]
+    counts: list[int] = []
+    for i, slen in enumerate(seg_lengths):
+        if i < len(seg_lengths) - 1:
+            counts.append(round(expanded_len * slen / total_len))
+        else:
+            counts.append(expanded_len - sum(counts))
+    if sum(counts) != expanded_len:
+        counts[-1] += expanded_len - sum(counts)
+    start = 0
+    for (_, target_el, kind), count in zip(segments, counts):
+        part = expanded[start : start + count]
+        start += count
+        if kind == "text":
+            target_el.text = part if part else None
+        else:
+            target_el.tail = part if part else None
 
 
 def _has_descendant_block(el: etree._Element, tags: set[str]) -> bool:
@@ -661,7 +705,7 @@ def _expand_once(
                 if progress_callback is not None:
                     progress_callback(i + 1, total, "Expanding…")
                 _, el, expanded = expand_one((i, el, raw))
-                _set_inner_text(el, expanded)
+                _set_inner_text_preserving_structure(el, expanded)
                 if partial_result_callback is not None:
                     partial_result_callback(_serialize_root(root))
         else:
@@ -681,7 +725,7 @@ def _expand_once(
                     # Apply in order, calling progress and partial callback
                     while next_to_apply < total and results[next_to_apply] is not None:
                         el_a, expanded_a = results[next_to_apply]
-                        _set_inner_text(el_a, expanded_a)
+                        _set_inner_text_preserving_structure(el_a, expanded_a)
                         if progress_callback is not None:
                             progress_callback(next_to_apply + 1, total, "Expanding…")
                         # Stream updates; throttle when many blocks to reduce serialization cost
