@@ -28,6 +28,10 @@ def _get_max_concurrent(backend: str) -> int:
             pass
     if backend == "rules":
         return 8
+    if backend == "anthropic":
+        return 2
+    if backend == "groq":
+        return 2
     if backend == "local":
         try:
             from .gpu_detect import detect_high_end_gpu
@@ -289,17 +293,18 @@ def _expand_whole_document(
     api_key: str | None,
     modality: str = "full",
     *,
+    backend: str = "gemini",
     examples_path: Path | str | None = None,
     client: Any = None,
     uploaded_file: Any = None,
 ) -> str:
-    """Expand entire XML document in one Gemini call.
+    """Expand entire XML document in one Gemini or Anthropic call.
     When examples_path is provided, upload it via Files API and pass [ex_file, xml]; else embed examples in prompt.
     """
-    from run_gemini import run_gemini
-
     examples_path = Path(examples_path) if examples_path else None
-    use_file_upload = examples_path is not None and examples_path.exists()
+    use_file_upload = (
+        backend == "gemini" and examples_path is not None and examples_path.exists()
+    )
 
     if use_file_upload:
         # User's pattern: upload examples file, pass [ex_file, "\n\n", input_xml]
@@ -320,16 +325,39 @@ def _expand_whole_document(
         file_path = None
         temperature = 0.2
 
-    result = run_gemini(
-        contents,
-        model=model,
-        api_key=api_key,
-        system_instruction=system,
-        temperature=temperature,
-        client=client,
-        uploaded_file=uploaded_file,
-        file_path=file_path,
-    )
+    if backend == "anthropic":
+        from .anthropic_llm import run_anthropic
+
+        result = run_anthropic(
+            contents,
+            model=model,
+            api_key=api_key,
+            system_instruction=system,
+            temperature=temperature,
+        )
+    elif backend == "groq":
+        from .groq_llm import run_groq
+
+        result = run_groq(
+            contents,
+            model=model,
+            api_key=api_key,
+            system_instruction=system,
+            temperature=temperature,
+        )
+    else:
+        from run_gemini import run_gemini
+
+        result = run_gemini(
+            contents,
+            model=model,
+            api_key=api_key,
+            system_instruction=system,
+            temperature=temperature,
+            client=client,
+            uploaded_file=uploaded_file,
+            file_path=file_path,
+        )
     # Strip markdown code blocks if present
     s = result.strip()
     if s.startswith("```xml"):
@@ -404,6 +432,36 @@ def _expand_text_block(
             sorted_pairs=sorted_pairs, high_end_gpu=high_end_gpu,
         )
     prompt = (prompt_prefix + text + "\nFull:") if prompt_prefix else _build_prompt(examples, text, modality=modality)
+    if backend == "anthropic":
+        from .anthropic_llm import run_anthropic
+
+        system = MODALITY_SYSTEM.get(modality) or MODALITY_SYSTEM["full"]
+        raw = run_anthropic(
+            prompt,
+            model=model,
+            api_key=api_key,
+            system_instruction=system,
+            temperature=0.2,
+        )
+        if examples:
+            from .local_llm import run_local_rules
+            return run_local_rules(raw, examples=examples, sorted_pairs=sorted_pairs)
+        return raw
+    if backend == "groq":
+        from .groq_llm import run_groq
+
+        system = MODALITY_SYSTEM.get(modality) or MODALITY_SYSTEM["full"]
+        raw = run_groq(
+            prompt,
+            model=model,
+            api_key=api_key,
+            system_instruction=system,
+            temperature=0.2,
+        )
+        if examples:
+            from .local_llm import run_local_rules
+            return run_local_rules(raw, examples=examples, sorted_pairs=sorted_pairs)
+        return raw
     from run_gemini import run_gemini
 
     system = MODALITY_SYSTEM.get(modality) or MODALITY_SYSTEM["full"]
@@ -544,11 +602,16 @@ def _expand_once(
     from .examples_io import select_examples_for_prompt
     prompt_examples = select_examples_for_prompt(examples, max_examples=max_examples, strategy=example_strategy)
 
-    if whole_document and backend == "gemini" and not dry_run:
+    if whole_document and backend in ("gemini", "anthropic", "groq") and not dry_run:
         # When examples_path provided, upload examples file and pass [ex_file, xml]; else use input_file_path for XML if set
         client: Any = None
         uploaded_file: Any = None
-        if input_file_path is not None and input_file_path.exists() and not examples_path:
+        if (
+            backend == "gemini"
+            and input_file_path is not None
+            and input_file_path.exists()
+            and not examples_path
+        ):
             from run_gemini import prepare_file_session
             client, uploaded_file = prepare_file_session(input_file_path, api_key)
         try:
@@ -558,7 +621,8 @@ def _expand_once(
                 model=model,
                 api_key=api_key,
                 modality=modality,
-                examples_path=examples_path,
+                backend=backend,
+                examples_path=examples_path if backend == "gemini" else None,
                 client=client,
                 uploaded_file=uploaded_file,
             )
@@ -613,7 +677,7 @@ def _expand_once(
     if not dry_run and total > 0:
         prompt_prefix = (
             _build_prompt_prefix_examples_only(prompt_examples)
-            if backend == "gemini"
+            if backend in ("gemini", "anthropic", "groq")
             else _build_prompt_prefix(prompt_examples, modality)
         )
         if backend == "local" and prompt_examples:

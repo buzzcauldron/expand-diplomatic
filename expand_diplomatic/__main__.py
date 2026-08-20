@@ -155,7 +155,18 @@ def _run_expand(args: argparse.Namespace) -> None:
 
     dry_run = getattr(args, "dry_run", False)
     backend = getattr(args, "backend", "gemini")
-    api_key: str | None = getattr(args, "api_key", None) or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+    api_key: str | None = getattr(args, "api_key", None)
+    if not api_key:
+        if backend == "anthropic":
+            api_key = os.environ.get("ANTHROPIC_API_KEY") or os.environ.get(
+                "TRANSCRIBER_SHELL_ANTHROPIC_API_KEY"
+            )
+        elif backend == "groq":
+            api_key = os.environ.get("GROQ_API_KEY") or os.environ.get(
+                "TRANSCRIBER_SHELL_GROQ_API_KEY"
+            )
+        else:
+            api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
 
     if not dry_run and backend == "gemini" and not api_key:
         if getattr(args, "prompt_key", False) and sys.stdin.isatty():
@@ -164,8 +175,21 @@ def _run_expand(args: argparse.Namespace) -> None:
             print("Error:", _api_key_error_message(), file=sys.stderr)
             print("Use --backend local for Ollama, or --api-key KEY, or --prompt-key to ask interactively.", file=sys.stderr)
             sys.exit(1)
+    if not dry_run and backend == "anthropic" and not api_key:
+        print("Error: ANTHROPIC_API_KEY is not set.", file=sys.stderr)
+        sys.exit(1)
+    if not dry_run and backend == "groq" and not api_key:
+        print("Error: GROQ_API_KEY is not set.", file=sys.stderr)
+        sys.exit(1)
 
-    model = args.model if backend == "gemini" else getattr(args, "local_model", "llama3.2")
+    if backend == "gemini":
+        model = args.model
+    elif backend == "anthropic":
+        model = args.model or os.environ.get("ANTHROPIC_MODEL") or "claude-haiku-4-5-20251001"
+    elif backend == "groq":
+        model = args.model or os.environ.get("GROQ_MODEL") or "llama-3.3-70b-versatile"
+    else:
+        model = getattr(args, "local_model", "llama3.2")
     modality = getattr(args, "modality", "full") or "full"
 
     try:
@@ -492,9 +516,9 @@ def main() -> None:
     ap.add_argument(
         "--backend",
         type=str,
-        choices=("gemini", "local"),
+        choices=("gemini", "local", "anthropic", "groq"),
         default="gemini",
-        help="Backend: gemini (API) or local (Ollama)",
+        help="Backend: gemini (API), anthropic (API), groq (API), or local (Ollama)",
     )
     ap.add_argument(
         "--local-model",

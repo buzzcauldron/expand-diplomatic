@@ -18,13 +18,73 @@ import argparse
 import concurrent.futures
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any, Optional
 
-# Extra retries for 429 with longer backoff (seconds)
+# Extra retries for 429 with longer backoff (seconds). Unused when cycling models.
 _429_BACKOFF_SEC = 8
 _429_EXTRA_RETRIES = 2
+
+# Free-tier RPD is per model. On 429/404, skip that id and try the next.
+_DEFAULT_MODEL_CYCLE: tuple[str, ...] = (
+    "gemini-2.5-flash-lite",
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-lite",
+    "gemini-1.5-flash",
+    "gemini-1.5-flash-8b",
+    "gemini-flash-latest",
+    "gemini-2.5-flash",
+)
+_skip_lock = threading.Lock()
+_skip_models: set[str] = set()
+
+
+def _reset_gemini_cycle_for_tests() -> None:
+    with _skip_lock:
+        _skip_models.clear()
+
+
+def _cycle_from_env() -> tuple[str, ...]:
+    raw = (os.environ.get("GEMINI_MODEL_CYCLE") or os.environ.get("TRANSCRIBER_SHELL_GEMINI_MODEL_CYCLE") or "").strip()
+    if not raw:
+        return _DEFAULT_MODEL_CYCLE
+    parts = tuple(p.strip() for p in raw.split(",") if p.strip())
+    return parts or _DEFAULT_MODEL_CYCLE
+
+
+def _models_to_try(preferred: str) -> list[str]:
+    ordered: list[str] = []
+    for mid in (preferred, *_cycle_from_env()):
+        if mid and mid not in ordered:
+            ordered.append(mid)
+    with _skip_lock:
+        skipped = set(_skip_models)
+    live = [m for m in ordered if m not in skipped]
+    return live or ordered
+
+
+def _mark_skip(model: str) -> None:
+    with _skip_lock:
+        _skip_models.add(model)
+
+
+def _is_cycleable_error(exc: BaseException) -> bool:
+    code = getattr(exc, "code", None)
+    if code is None:
+        code = getattr(exc, "status_code", None)
+    try:
+        icode = int(code) if code is not None else 0
+    except (TypeError, ValueError):
+        icode = 0
+    if icode in {429, 404}:
+        return True
+    text = str(exc)
+    return any(
+        tok in text
+        for tok in ("429", "RESOURCE_EXHAUSTED", "NOT_FOUND", "is not found", "not supported")
+    )
 
 from dotenv import load_dotenv
 from google import genai
@@ -201,24 +261,22 @@ def run_gemini(
     timeout: seconds to wait per request (default: GEMINI_TIMEOUT env or 120).
       If the request takes longer, raises TimeoutError.
     """
-    if model is None:
-        model = _DEFAULT_GEMINI
+    preferred = model or _DEFAULT_GEMINI
     key = _get_api_key(api_key)
     base_t = timeout if timeout is not None else _get_timeout_seconds()
-    t = _get_timeout_for_model(model, base_t)
-    retries = _get_retry_attempts()
-    # Thread timeout slightly above HTTP timeout so HTTP timeout fires first when respected
-    thread_timeout = t + 15.0
+    last_err: Optional[Exception] = None
 
-    def do_call() -> str:
+    def do_call(mid: str) -> str:
+        t = _get_timeout_for_model(mid, base_t)
+        thread_timeout = t + 15.0
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
             fut = ex.submit(
                 _do_run_gemini,
                 contents,
-                model,
+                mid,
                 key,
                 timeout_sec=t,
-                retry_attempts=retries,
+                retry_attempts=0,
                 system_instruction=system_instruction,
                 temperature=temperature,
                 max_output_tokens=max_output_tokens,
@@ -234,26 +292,33 @@ def run_gemini(
                     "Set GEMINI_TIMEOUT (seconds) in .env to change, or use backend=local."
                 ) from None
 
-    last_err: Optional[Exception] = None
-    max_attempts = 1 + _429_EXTRA_RETRIES + TIMEOUT_EXTRA_RETRIES
-    timeout_retries_left = TIMEOUT_EXTRA_RETRIES
-    for attempt in range(max_attempts):
-        try:
-            return do_call()
-        except Exception as e:
-            last_err = e
-            if genai_errors and isinstance(e, genai_errors.APIError):
-                code = getattr(e, "code", 0) or 0
-                if code == 429 and attempt < _429_EXTRA_RETRIES:
-                    time.sleep(_429_BACKOFF_SEC)
+    for mid in _models_to_try(preferred):
+        timeout_retries_left = TIMEOUT_EXTRA_RETRIES
+        while True:
+            try:
+                result = do_call(mid)
+                if mid != preferred:
+                    print(f"[gemini] using {mid} (cycled off {preferred})", file=sys.stderr, flush=True)
+                return result
+            except TimeoutError as e:
+                last_err = e
+                if timeout_retries_left > 0:
+                    timeout_retries_left -= 1
+                    time.sleep(2)
                     continue
-            # Retry once on timeout (often transient)
-            if isinstance(e, TimeoutError) and timeout_retries_left > 0:
-                timeout_retries_left -= 1
-                time.sleep(2)  # Brief pause before retry
-                continue
-            raise
-    raise last_err or RuntimeError("Unexpected")
+                raise
+            except Exception as e:
+                last_err = e
+                if _is_cycleable_error(e):
+                    _mark_skip(mid)
+                    print(
+                        f"[gemini] skip {mid} ({type(e).__name__}); trying next model",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                    break
+                raise
+    raise last_err or RuntimeError("Gemini: all models in cycle exhausted or unavailable")
 
 
 def _api_error_message(code: int, status: str | None, message: str | None) -> str:

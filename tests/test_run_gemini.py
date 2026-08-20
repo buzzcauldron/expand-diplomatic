@@ -162,3 +162,34 @@ class TestBatchProParallel:
         if "pro" in (model or "").lower():
             parallel = min(parallel, 2)
         assert parallel == 8
+
+
+class TestModelCycle:
+    """429 on one model falls through to the next id."""
+
+    def test_run_gemini_cycles_on_429(self) -> None:
+        import os
+
+        from run_gemini import _reset_gemini_cycle_for_tests, run_gemini
+
+        _reset_gemini_cycle_for_tests()
+        os.environ["GEMINI_MODEL_CYCLE"] = "gemini-2.5-flash,gemini-2.0-flash"
+        calls: list[str] = []
+
+        def fake(contents, model, key, **kwargs):
+            calls.append(model)
+            if model == "gemini-2.5-flash":
+                err = Exception("429 RESOURCE_EXHAUSTED")
+                err.code = 429  # type: ignore[attr-defined]
+                raise err
+            return "ok"
+
+        try:
+            with unittest.mock.patch("run_gemini._get_api_key", return_value="x"):
+                with unittest.mock.patch("run_gemini._do_run_gemini", side_effect=fake):
+                    assert run_gemini("hi", model="gemini-2.5-flash") == "ok"
+        finally:
+            os.environ.pop("GEMINI_MODEL_CYCLE", None)
+            _reset_gemini_cycle_for_tests()
+        assert calls[0] == "gemini-2.5-flash"
+        assert "gemini-2.0-flash" in calls
